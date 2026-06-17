@@ -12,34 +12,29 @@ common deps
                       text,
                       bytestring,
                       aeson,
+                      yaml,
                       containers,
                       directory,
                       filepath,
                       process,
-                      mtl,
-                      transformers,
                       http-client,
                       http-client-tls,
                       http-types,
                       vector,
-                      file-embed,
-                      template-haskell,
-                      time
+                      time,
+                      unordered-containers
     ghc-options:      -Wall -Wno-unused-imports -Wno-unused-matches
 
 library
     import:           deps
     hs-source-dirs:   src
     exposed-modules:  Blackbox.Types
-                      Blackbox.Classifier
-                      Blackbox.Plan
-                      Blackbox.Idiom
-                      Blackbox.Probe
-                      Blackbox.LLM
-                      Blackbox.InnerLoop
+                      Blackbox.Oracle
+                      Blackbox.Deepseek
+                      Blackbox.Trace
+                      Blackbox.Init
+                      Blackbox.Loop
                       Blackbox.Belief
-                      Blackbox.EmbeddedData
-                      Blackbox.Extract
 
 executable hsbb
     import:           deps
@@ -47,10 +42,3 @@ executable hsbb
     main-is:          Main.hs
     build-depends:    hs-blackbox-agent
     ghc-options:      -threaded
-
-test-suite spec
-    import:           deps
-    type:             exitcode-stdio-1.0
-    hs-source-dirs:   test
-    main-is:          Spec.hs
-    build-depends:    hs-blackbox-agent
