@@ -9,10 +9,15 @@ module Blackbox.Oracle
       Oracle
     , initOracle
     , summary
+    , dynamicSection      -- 本轮动态 / 未触槽 / 累计次数
     , appendProbe
     , countProbes
-    , loadOracle      -- for belief synthesis
-    , lastProbeRecord -- for step mode resume
+    , setCurrentRound     -- 设置当前轮号供 writeSlot 元数据记录
+    , setLastIntegrationAttempts  -- 整理阶段结束时记录 LLM 尝试 writeSlot 次数
+    , loadOracle          -- for belief synthesis
+    , lastProbeRecord     -- for step mode resume
+    , uniqueProbeCommands -- 去重的历史 probe cmd 列表
+    , referenceProbes     -- 常驻参考文档 (--help / --version 类)
       -- LLM-facing tool dispatcher
     , dispatchTool
       -- direct ops used by Init
@@ -49,10 +54,12 @@ import           Blackbox.Types          (universalSlots)
 -- ---------------------------------------------------------------
 
 data Oracle = Oracle
-    { oraclePath     :: FilePath          -- oracle.yaml
-    , probesPath     :: FilePath          -- probes.jsonl
-    , oracleState    :: IORef A.Value     -- mirror of oracle.yaml
-    , probesCount    :: IORef Int         -- cached count
+    { oraclePath              :: FilePath
+    , probesPath              :: FilePath
+    , oracleState             :: IORef A.Value
+    , probesCount             :: IORef Int
+    , currentRound            :: IORef Int           -- 0 for init, ≥1 for main loop
+    , lastIntegrationAttempts :: IORef Int           -- 上一次 integration 里 LLM 尝试了几次 writeSlot
     }
 
 
@@ -66,8 +73,20 @@ initOracle taskDir = do
     initialCount  <- countLinesIfExists pP
     oRef <- newIORef initialOracle
     pRef <- newIORef initialCount
+    rRef <- newIORef (-1)
+    aRef <- newIORef 0
     pure Oracle { oraclePath = oP, probesPath = pP
-                , oracleState = oRef, probesCount = pRef }
+                , oracleState = oRef, probesCount = pRef
+                , currentRound = rRef
+                , lastIntegrationAttempts = aRef }
+
+
+setCurrentRound :: Oracle -> Int -> IO ()
+setCurrentRound o n = atomicModifyIORef' (currentRound o) (\_ -> (n, ()))
+
+
+setLastIntegrationAttempts :: Oracle -> Int -> IO ()
+setLastIntegrationAttempts o n = atomicModifyIORef' (lastIntegrationAttempts o) (\_ -> (n, ()))
 
 
 loadOrEmptyYaml :: FilePath -> IO A.Value
@@ -174,6 +193,101 @@ formatConf x = T.pack (showFixed2 x)
                                    in i ++ "." ++ d
 
 
+-- Render 本轮动态 / 未触槽 / 累计 writeSlot 次数。
+-- `currentRoundN`: harness 即将进入的 round 号，用于判定哪一槽是"上轮"升级的。
+dynamicSection :: Oracle -> Int -> IO Text
+dynamicSection o currentRoundN = do
+    val <- readIORef (oracleState o)
+    attempts <- readIORef (lastIntegrationAttempts o)
+    case val of
+        A.Object root ->
+            let slotsMap = case KM.lookup "slots" root of
+                              Just (A.Object s) -> s
+                              _                 -> KM.empty
+                slotInfo = [ extractInfo sid slotsMap | sid <- universalSlots ]
+                lastRoundUpdate = currentRoundN - 1
+                upgraded = [ (sid, d, lpc, conf)
+                           | (sid, _wc, lr, d, lpc, conf) <- slotInfo
+                           , lr == lastRoundUpdate, lr > 0 ]
+                untouched = [ sid | (sid, wc, _lr, _d, _lpc, _conf) <- slotInfo, wc == 0 ]
+                counts = [ (sid, wc) | (sid, wc, _lr, _d, _lpc, _conf) <- slotInfo ]
+                upgradeRender =
+                    case upgraded of
+                        [] -> [ "- 上轮升级: (无)" ]
+                        xs -> [ "- 上轮升级: " <> sid
+                                <> "  (你给 " <> T.pack (showFixed3 lpc)
+                                <> ", decay 后实际 +" <> T.pack (showDelta d)
+                                <> " → 当前 " <> T.pack (showFixed3 conf) <> ")"
+                              | (sid, d, lpc, conf) <- xs ]
+                attemptRender =
+                    if attempts > 1
+                    then [ "- 上轮 writeSlot 尝试: " <> T.pack (show attempts)
+                           <> " 次, 实际生效 1 个 (后续被 harness 静默丢弃, 浪费 "
+                           <> T.pack (show (attempts - 1)) <> " 次 tool call)" ]
+                    else if attempts == 1
+                         then [ "- 上轮 writeSlot 尝试: 1 次, 生效" ]
+                         else [ "- 上轮 writeSlot 尝试: 0 次 (上轮整理未发 writeSlot)" ]
+                lines_ =
+                    [ "## 本轮动态" ]
+                    ++ upgradeRender
+                    ++ attemptRender
+                    ++ (case untouched of
+                          [] -> [ "- 未触槽: (无)" ]
+                          xs -> [ "- 未触槽: " <> T.intercalate ", " xs ])
+                    ++ [ "- 各槽累计 writeSlot 次数:" ]
+                    ++ [ "    " <> T.intercalate "  "
+                          [ sid <> ":" <> T.pack (show wc) | (sid, wc) <- counts ] ]
+            in pure (T.unlines lines_)
+        _ -> pure "## 本轮动态\n(empty)\n"
+  where
+    extractInfo sid slotsMap =
+        case KM.lookup (Key.fromText sid) slotsMap of
+            Just (A.Object so) ->
+                let wc  = case KM.lookup "write_count" so of
+                            Just (A.Number n) -> truncate n :: Int
+                            _                 -> 0
+                    lr  = case KM.lookup "last_round" so of
+                            Just (A.Number n) -> truncate n :: Int
+                            _                 -> 0
+                    ld  = case KM.lookup "last_delta" so of
+                            Just (A.Number n) -> realToFrac n :: Double
+                            _                 -> 0
+                    lpc = case KM.lookup "last_proposed_conf" so of
+                            Just (A.Number n) -> realToFrac n :: Double
+                            _                 -> 0
+                    cf  = case KM.lookup "confidence" so of
+                            Just (A.Number n) -> realToFrac n :: Double
+                            _                 -> 0
+                in (sid, wc, lr, ld, lpc, cf)
+            _ -> (sid, 0, 0, 0, 0, 0)
+
+
+showFixed3 :: Double -> String
+showFixed3 x =
+    let r = round (x * 1000) :: Int
+        s = show (abs r)
+        padded = case s of
+                    [a]    -> "00" ++ [a]
+                    [a, b] -> "0" ++ [a, b]
+                    cs     -> cs
+        (intPart, decPart) = splitAt (length padded - 3) padded
+        intStr = if null intPart then "0" else intPart
+    in intStr ++ "." ++ decPart
+
+
+showDelta :: Double -> String
+showDelta d =
+    let r = round (d * 1000) :: Int
+        s = show (abs r)
+        padded = case s of
+                    [a]       -> "00" ++ [a]
+                    [a, b]    -> "0" ++ [a, b]
+                    cs        -> cs
+        (intPart, decPart) = splitAt (length padded - 3) padded
+        intStr = if null intPart then "0" else intPart
+    in intStr ++ "." ++ decPart
+
+
 -- Append a probe record (as JSON line) to probes.jsonl.
 appendProbe :: Oracle -> A.Value -> IO ()
 appendProbe o v = do
@@ -206,6 +320,82 @@ lastProbeRecord o = do
                 case A.eitherDecodeStrict (TE.encodeUtf8 lastLine) of
                     Right v -> pure (Just v)
                     Left _  -> pure Nothing
+
+
+-- 返回当前 probes.jsonl 里的"参考文档" probe (--help / --version 类)。
+-- 按优先级 (help: --help > -h > -?; version: --version > -v > -V) 每类只挑 1 个胜出者。
+-- 有效判定: max(stdout, stderr) >= 200 字节 AND 内容含 usage / option / flag / version 等关键词。
+-- 返回 [(probe_id, cmd, 内容)], 最多 2 条 (help 类 + version 类各 1)。
+referenceProbes :: Oracle -> IO [(Text, Text, Text)]
+referenceProbes o = do
+    ex <- doesFileExist (probesPath o)
+    if not ex then pure []
+    else do
+        contents <- TIO.readFile (probesPath o)
+        let ls = filter (not . T.null) (T.lines contents)
+            records = [ (pid, cmd, stdout, stderr)
+                      | line <- ls
+                      , Right (A.Object obj) <- [A.eitherDecodeStrict (TE.encodeUtf8 line)]
+                      , Just (A.String pid)    <- [KM.lookup "id" obj]
+                      , Just (A.String cmd)    <- [KM.lookup "cmd" obj]
+                      , Just (A.String stdout) <- [KM.lookup "stdout" obj]
+                      , Just (A.String stderr) <- [KM.lookup "stderr" obj]
+                      ]
+            helpRef = pickByPriority records ["--help", "-h", "-?"] isHelpContent
+            verRef  = pickByPriority records ["--version", "-v", "-V"] isVersionContent
+        pure (catMaybes [helpRef, verRef])
+  where
+    catMaybes = foldr (\m acc -> case m of Just x -> x : acc; Nothing -> acc) []
+
+    pickByPriority records flags validate =
+        let cands = [ (pid, cmd, content)
+                    | flag <- flags
+                    , (pid, cmd, stdout, stderr) <- records
+                    , flagMatches cmd flag
+                    , let content = pickContent stdout stderr
+                    , T.length content >= 200
+                    , validate content
+                    ]
+        in case cands of
+            (x : _) -> Just x
+            []      -> Nothing
+
+    pickContent stdout stderr =
+        if T.length stdout >= T.length stderr then stdout else stderr
+
+    flagMatches cmd flag =
+        -- 简单匹配: cmd 含 flag 子串, 但排除 "--help-all" 类长前缀冒充
+        T.isInfixOf (" " <> flag) cmd
+
+    isHelpContent t =
+        let lower = T.toLower t
+        in any (`T.isInfixOf` lower) ["usage:", "options:", "flags:", "arguments:", "command:"]
+
+    isVersionContent t =
+        let lower = T.toLower t
+        in any (`T.isInfixOf` lower) ["version", " v.", "build", "rev "]
+
+
+-- 返回去重后的 cmd 列表 (保留首次出现顺序)。用于 decision prompt 防 LLM 重复探。
+uniqueProbeCommands :: Oracle -> IO [Text]
+uniqueProbeCommands o = do
+    ex <- doesFileExist (probesPath o)
+    if not ex then pure []
+    else do
+        contents <- TIO.readFile (probesPath o)
+        let ls = filter (not . T.null) (T.lines contents)
+            cmds = [ c
+                   | line <- ls
+                   , Right (A.Object obj) <- [A.eitherDecodeStrict (TE.encodeUtf8 line)]
+                   , Just (A.String c) <- [KM.lookup "cmd" obj]
+                   ]
+        pure (dedupKeepOrder cmds)
+  where
+    dedupKeepOrder = goD []
+    goD seen [] = reverse seen
+    goD seen (x : xs)
+        | x `elem` seen = goD seen xs
+        | otherwise     = goD (x : seen) xs
 
 
 -- ---------------------------------------------------------------
@@ -263,28 +453,103 @@ writeSlotTool _ _ = pure "error: bad args"
 
 
 -- Raw writeSlot — used both by tool dispatcher and Init phase.
+--
+-- Confidence 应用衰减公式 (LLM 不知道):
+--   obtained = min(LLM 给的值, 0.2)
+--   delta    = obtained * (1 - current)
+--   new      = current + delta
+-- 这样 LLM 即便每次都给 1.0, 实际累加也是逐步收敛的。
 writeSlotRaw :: Oracle -> Text -> KM.KeyMap A.Value -> UTCTime -> IO ()
 writeSlotRaw o sid args now = do
     let isUniversal = sid `elem` universalSlots
-    let rec_ = makeSlotRecord args now
+    currentState <- readIORef (oracleState o)
+    roundN <- readIORef (currentRound o)
+    let isInitPhase  = roundN < 0
+        currentConf  = getCurrentConfidence currentState sid isUniversal
+        currentCount = getCurrentWriteCount currentState sid isUniversal
+        llmValue     = case KM.lookup "confidence" args of
+                         Just (A.Number n) -> realToFrac n :: Double
+                         _                 -> 0
+        newConf      = applyConfidenceDecay currentConf llmValue
+        delta        = newConf - currentConf
+        -- init 阶段不算"实际探测", write_count 不递增, last_round 保持 -1 标记
+        newCount     = if isInitPhase then currentCount else currentCount + 1
+        argsExtended = KM.insert "confidence"         (A.Number (realToFrac newConf))
+                     $ KM.insert "write_count"        (A.Number (fromIntegral newCount))
+                     $ KM.insert "last_round"         (A.Number (fromIntegral roundN))
+                     $ KM.insert "last_delta"         (A.Number (realToFrac delta))
+                     $ KM.insert "last_proposed_conf" (A.Number (realToFrac llmValue))
+                       args
+    let rec_ = makeSlotRecord argsExtended now
     if isUniversal
         then atomicModifyIORef' (oracleState o) $ \v ->
                 (updateUniversalSlot v sid rec_, ())
         else atomicModifyIORef' (oracleState o) $ \v ->
                 (updateOtherSlot v sid rec_, ())
     cur <- readIORef (oracleState o)
-    -- Persist
     BS.writeFile (oraclePath o) (Y.encode cur)
+
+
+getCurrentWriteCount :: A.Value -> Text -> Bool -> Int
+getCurrentWriteCount (A.Object root) sid True =
+    case KM.lookup "slots" root of
+        Just (A.Object slotsMap) ->
+            case KM.lookup (Key.fromText sid) slotsMap of
+                Just (A.Object so) ->
+                    case KM.lookup "write_count" so of
+                        Just (A.Number n) -> truncate n
+                        _                 -> 0
+                _ -> 0
+        _ -> 0
+getCurrentWriteCount _ _ _ = 0
+
+
+-- 衰减公式：每次 probe 单次上升受 0.2 上限 + (1-current) 衰减。
+applyConfidenceDecay :: Double -> Double -> Double
+applyConfidenceDecay current llmValue =
+    let obtained = min 0.2 llmValue
+        delta    = obtained * (1 - current)
+    in current + delta
+
+
+-- 读 slot 现有 confidence (universal 走 slots dict, other 走 array)。
+getCurrentConfidence :: A.Value -> Text -> Bool -> Double
+getCurrentConfidence (A.Object root) sid True =
+    case KM.lookup "slots" root of
+        Just (A.Object slotsMap) ->
+            case KM.lookup (Key.fromText sid) slotsMap of
+                Just (A.Object so) ->
+                    case KM.lookup "confidence" so of
+                        Just (A.Number n) -> realToFrac n
+                        _                 -> 0
+                _ -> 0
+        _ -> 0
+getCurrentConfidence (A.Object root) sid False =
+    case KM.lookup "other" root of
+        Just (A.Array a) ->
+            case [ realToFrac n
+                 | A.Object o <- V.toList a
+                 , KM.lookup "id" o == Just (A.String sid)
+                 , Just (A.Number n) <- [KM.lookup "confidence" o]
+                 ] of
+                (c : _) -> c
+                _       -> 0
+        _ -> 0
+getCurrentConfidence _ _ _ = 0
 
 
 makeSlotRecord :: KM.KeyMap A.Value -> UTCTime -> A.Value
 makeSlotRecord args now = A.Object $ KM.fromList $
-    [ ("title",      pickField "title" args (A.String ""))
-    , ("confidence", pickField "confidence" args (A.Number 0))
-    , ("content",    pickField "content" args (A.String ""))
-    , ("evidence",   pickField "evidence" args (A.Array V.empty))
-    , ("notes",      pickField "notes" args (A.String ""))
-    , ("updated_at", A.String (T.pack (show now)))
+    [ ("title",              pickField "title" args (A.String ""))
+    , ("confidence",         pickField "confidence" args (A.Number 0))
+    , ("content",            pickField "content" args (A.String ""))
+    , ("evidence",           pickField "evidence" args (A.Array V.empty))
+    , ("notes",              pickField "notes" args (A.String ""))
+    , ("write_count",        pickField "write_count" args (A.Number 0))
+    , ("last_round",         pickField "last_round"  args (A.Number 0))
+    , ("last_delta",         pickField "last_delta"  args (A.Number 0))
+    , ("last_proposed_conf", pickField "last_proposed_conf" args (A.Number 0))
+    , ("updated_at",         A.String (T.pack (show now)))
     ] ++ indexEntry args
 
 

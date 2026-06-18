@@ -11,6 +11,8 @@ module Blackbox.Loop
 
 import           Control.Exception       (SomeException, try)
 import           Control.Monad           (when)
+import           Data.IORef              (atomicModifyIORef', newIORef,
+                                          readIORef)
 import qualified Data.Aeson              as A
 import qualified Data.Aeson.Key          as Key
 import qualified Data.Aeson.KeyMap       as KM
@@ -28,9 +30,13 @@ import           System.Process          (CreateProcess (..), shell,
 import           Blackbox.Deepseek       (Message (..), runChat,
                                           writeSlotTool,
                                           lookupProbeTool, ChatResult (..))
-import           Blackbox.Oracle         (Oracle, summary, appendProbe,
-                                          countProbes, dispatchTool,
-                                          lastProbeRecord)
+import           Blackbox.Oracle         (Oracle, summary, dynamicSection,
+                                          appendProbe, countProbes,
+                                          dispatchTool, lastProbeRecord,
+                                          setCurrentRound,
+                                          setLastIntegrationAttempts,
+                                          uniqueProbeCommands,
+                                          referenceProbes)
 import           Blackbox.Trace          (TraceHandle, appendEvent,
                                           phaseStart, phaseEnd)
 import           Blackbox.Types          (Action (..), LastResult (..),
@@ -95,6 +101,16 @@ runStep oracle apiKey model taskDir trace = do
                     putStrLn "[step] integration phase..."
                     integrationPhase oracle apiKey model trace roundN act lr
                     phaseEnd trace (roundTag <> "_integration")
+                    phaseStart trace (roundTag <> "_gate")
+                    putStrLn "[step] gate phase..."
+                    cont <- gatePhase oracle apiKey model trace roundN
+                    phaseEnd trace (roundTag <> "_gate")
+                    if cont
+                        then putStrLn "[step] gate 判 继续 (本步退出, 下次再调 step)"
+                        else do
+                            appendEvent trace "convergence" (A.object
+                                [ "reason" A..= ("gate_stop" :: Text) ])
+                            putStrLn "[step] gate 判 收敛"
                     putStrLn "[step] done."
 
 
@@ -163,12 +179,15 @@ runLoop oracle apiKey model taskDir trace = do
                         putStrLn $ "[round " ++ show roundN ++ "] no valid action, stopping."
                         pure ()
                     Just (ActStop reason) -> do
-                        putStrLn $ "[round " ++ show roundN ++ "] LLM stop: " ++ T.unpack reason
-                        appendEvent trace "convergence" (A.object
-                            [ "reason" A..= ("llm_stop" :: Text)
-                            , "why" A..= reason
+                        -- 决策阶段不该出 stop, 收到当 warning 处理, 继续往下走 Gate 来收敛
+                        putStrLn $ "[round " ++ show roundN ++ "] WARN: decision returned stop ("
+                                  ++ T.unpack reason ++ "), ignoring; gate will decide."
+                        appendEvent trace "warn" (A.object
+                            [ "where" A..= ("decision" :: Text)
+                            , "msg"   A..= ("decision returned stop, ignored" :: Text)
+                            , "why"   A..= reason
                             ])
-                        pure ()
+                        loop startT (roundN + 1) lastResult
                     Just act -> do
                         putStrLn $ "[round " ++ show roundN ++ "] action: " ++ describeAction act
                         outcome <- executeAction taskDir act
@@ -183,7 +202,18 @@ runLoop oracle apiKey model taskDir trace = do
                                 putStrLn $ "[round " ++ show roundN ++ "] integration phase..."
                                 integrationPhase oracle apiKey model trace roundN act lr
                                 phaseEnd trace (roundTag <> "_integration")
-                                loop startT (roundN + 1) (Just lr)
+                                -- Gate 判断收敛
+                                phaseStart trace (roundTag <> "_gate")
+                                putStrLn $ "[round " ++ show roundN ++ "] gate phase..."
+                                cont <- gatePhase oracle apiKey model trace roundN
+                                phaseEnd trace (roundTag <> "_gate")
+                                if cont
+                                    then loop startT (roundN + 1) (Just lr)
+                                    else do
+                                        appendEvent trace "convergence" (A.object
+                                            [ "reason" A..= ("gate_stop" :: Text) ])
+                                        putStrLn $ "[round " ++ show roundN ++ "] gate 判 收敛"
+                                        pure ()
 
 
 elapsedSec :: UTCTime -> IO Double
@@ -205,10 +235,27 @@ mkProbeId n = pure (T.pack ("probe_" ++ pad3 n))
 decisionPhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> Maybe LastResult -> IO (Maybe Action)
 decisionPhase oracle apiKey model trace roundN lastResult = do
     summaryTxt <- summary oracle
+    dynamicTxt <- dynamicSection oracle roundN
     nProbes <- countProbes oracle
+    pastCmds <- uniqueProbeCommands oracle
+    refs <- referenceProbes oracle
     let lrSection = maybe "(无)\n" renderLastResult lastResult
+        probeStats = "\n## 探针计数\n本任务已发 probe 数: " <> T.pack (show nProbes)
+                  <> "\n历史参考: 同类案例平均 ~70 发, 范围 10-200, 具体探多少自行判断。\n"
+        refsSection = if null refs
+                      then ""
+                      else "\n## 参考文档 (常驻)\n"
+                        <> T.unlines
+                           [ "### " <> pid <> "\n$ " <> cmd <> "\n```\n"
+                             <> T.take 8192 content <> "\n```"
+                           | (pid, cmd, content) <- refs ]
+        pastSection = if null pastCmds
+                      then ""
+                      else "\n## 已执行过的 probe (去重)\n"
+                        <> T.unlines [ "- " <> c | c <- pastCmds ]
         sysPrompt = decisionSystemPrompt
-        userPrompt = summaryTxt <> "\n## 上轮回灌 (last_result)\n" <> lrSection
+        userPrompt = summaryTxt <> "\n" <> dynamicTxt <> refsSection <> probeStats <> pastSection
+                  <> "\n## 上轮回灌 (last_result)\n" <> lrSection
                   <> "\n## 你的任务\n基于以上, 决定下一步 action, 直接输出 action JSON。"
         msgs = [ SystemMsg sysPrompt, UserMsg userPrompt ]
 
@@ -255,6 +302,7 @@ extractJsonObject t =
 
 integrationPhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> Action -> LastResult -> IO ()
 integrationPhase oracle apiKey model trace roundN lastAction lr = do
+    setCurrentRound oracle roundN
     summaryTxt <- summary oracle
     let actJson = actionJson lastAction
         userPrompt = summaryTxt <> "\n\n## 上轮 action\n" <> actJson
@@ -262,10 +310,75 @@ integrationPhase oracle apiKey model trace roundN lastAction lr = do
                   <> "\n\n## 你的任务\n" <> integrationTask
         msgs = [ SystemMsg integrationSystemPrompt, UserMsg userPrompt ]
 
+    -- 机械限制: 本次 integration 只采纳第一个 writeSlot
+    writeSlotCounter <- newIORef (0 :: Int)
+    let wrappedHandler name args =
+            if name == "writeSlot"
+                then do
+                    n <- atomicModifyIORef' writeSlotCounter (\c -> (c + 1, c))
+                    if n == 0
+                        then dispatchTool oracle name args
+                        else pure "rejected: 本次 integration 已经写过 1 个槽, 后续 writeSlot 不生效 (一发 probe 只升 1 个槽)"
+                else dispatchTool oracle name args
+
     _ <- runChat apiKey model [writeSlotTool]
-            msgs (dispatchTool oracle) (appendEvent trace) 4
+            msgs wrappedHandler (appendEvent trace) 4
+
+    -- 记录本轮 LLM 尝试 writeSlot 的总次数, 供下一轮 dynamicSection 反馈
+    totalAttempts <- readIORef writeSlotCounter
+    setLastIntegrationAttempts oracle totalAttempts
 
     pure ()
+
+
+-- ---------------------------------------------------------------
+-- Gate phase
+-- ---------------------------------------------------------------
+
+gatePhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> IO Bool
+gatePhase oracle apiKey model trace _roundN = do
+    summaryTxt <- summary oracle
+    nProbes <- countProbes oracle
+    let probeStats = "\n## 探针计数\n本任务已发 probe 数: " <> T.pack (show nProbes)
+                  <> "\n历史参考: 同类案例平均 ~70 发, 范围 10-200。\n"
+        userPrompt = summaryTxt <> probeStats
+                  <> "\n## 你的任务\n判断信息是否足够收敛。直接输出 JSON: "
+                  <> "{\"continue\": true / false, \"why\": \"...\"}"
+        msgs = [ SystemMsg gateSystemPrompt, UserMsg userPrompt ]
+
+    result <- runChat apiKey model []
+                msgs (dispatchTool oracle) (appendEvent trace) 2
+
+    pure (parseGateVerdict (crContent result))
+
+
+-- 默认 True (继续) 兜底 —— 解析失败也算继续, 避免无故收敛
+parseGateVerdict :: Text -> Bool
+parseGateVerdict t =
+    case extractJsonObject t of
+        Nothing  -> True
+        Just obj -> case A.eitherDecodeStrict (TE.encodeUtf8 obj) of
+            Right (A.Object o) -> case KM.lookup "continue" o of
+                Just (A.Bool b) -> b
+                _               -> True
+            _ -> True
+
+
+gateSystemPrompt :: Text
+gateSystemPrompt = T.unlines
+    [ "你是 Gate 节点 —— 唯一职责: 判断 oracle 信息够不够收敛, 不参与「探什么」。"
+    , ""
+    , "**判断规则** (基于摘要里每槽 confidence, 7 universal 槽全算入):"
+    , "  - 7 槽均值 < 0.6  → continue (强制, 信息显然不够)"
+    , "  - 7 槽均值 ≥ 0.8  → 可以 converge (信息达可收敛水平)"
+    , "  - 0.6 ≤ 均值 < 0.8 → 斟酌区, 倾向 continue, 自己判"
+    , ""
+    , "参考: 12 个历史案例 7 槽均值范围 0.63-0.90, 平均 0.81。"
+    , "  - identity / cli_flags / io_channels / exit_codes 普遍达 0.85+"
+    , "  - error_buckets / impl_fingerprint / known_unknowns 通常 0.6-0.85"
+    , ""
+    , "回复 STRICT JSON: {\"continue\": true 或 false, \"why\": \"<简短理由, 含算出来的均值>\"}"
+    ]
 
 
 -- ---------------------------------------------------------------
@@ -371,10 +484,8 @@ decisionSystemPrompt = T.unlines
     , "  探一发：{\"action\":\"probe\",\"cmd\":\"./probe <args>\",\"why\":\"...\"}"
     , "  搜源码：{\"action\":\"grep\",\"pattern\":\"...\",\"files\":[\"path\"],\"why\":\"...\"}"
     , "  其他：  {\"action\":\"other\",\"kind\":\"shell/http/docker\",\"cmd\":\"...\",\"why\":\"...\"}"
-    , "  收工：  {\"action\":\"stop\",\"why\":\"...\"}"
     , ""
-    , "若信息已足或继续无新意 → stop。"
-    , "若未列出的槽位是关键 → 选 probe 把它探出来。"
+    , "**收敛判断不归你管, 由独立 Gate 节点决定; 你**只**出探索 action**, 不要出 stop**。"
     , "**最后只输出 action JSON, 不要前置 prose。**"
     ]
 
@@ -383,6 +494,10 @@ integrationSystemPrompt :: Text
 integrationSystemPrompt = T.unlines
     [ "你是黑盒探测 agent 的整理阶段。"
     , "上一发探索刚执行完, 看 last_result 揭示了什么, 决定要不要 writeSlot。"
+    , ""
+    , "**重要约束**："
+    , "  - 一发 probe 只能升 **1 个槽**——选 last_result 最直接揭示的那个写"
+    , "  - 即便给多个 writeSlot tool call, harness 只采纳第一个, 后续静默丢弃"
     , ""
     , "可用 tool："
     , "  - writeSlot(slot_id, title, content, confidence, evidence, [notes], [index])"
