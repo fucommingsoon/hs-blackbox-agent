@@ -12,8 +12,11 @@ module Blackbox.Oracle
     , dynamicSection      -- 本轮动态 / 未触槽 / 累计次数
     , appendProbe
     , countProbes
+    , countDecisionProbes -- 只算 round>0 的 probe (init 阶段机械 probe round=0)
     , setCurrentRound     -- 设置当前轮号供 writeSlot 元数据记录
     , setLastIntegrationAttempts  -- 整理阶段结束时记录 LLM 尝试 writeSlot 次数
+    , resetNextRoundHints -- integration 开始时清空给下一轮的 hint
+    , readNextRoundHints  -- decision 渲染 user prompt 时读上一发 integration 留的 hint
     , loadOracle          -- for belief synthesis
     , lastProbeRecord     -- for step mode resume
     , uniqueProbeCommands -- 去重的历史 probe cmd 列表
@@ -60,6 +63,7 @@ data Oracle = Oracle
     , probesCount             :: IORef Int
     , currentRound            :: IORef Int           -- 0 for init, ≥1 for main loop
     , lastIntegrationAttempts :: IORef Int           -- 上一次 integration 里 LLM 尝试了几次 writeSlot
+    , nextRoundHints          :: IORef [Text]        -- 上一发 integration 留给下一发 decision 的 actionable hint
     }
 
 
@@ -75,10 +79,13 @@ initOracle taskDir = do
     pRef <- newIORef initialCount
     rRef <- newIORef (-1)
     aRef <- newIORef 0
+    -- 从 oracle.yaml.next_round_hints 字段恢复 IORef (跨 hsbb step 进程持久)
+    hRef <- newIORef (readNextRoundHintsField initialOracle)
     pure Oracle { oraclePath = oP, probesPath = pP
                 , oracleState = oRef, probesCount = pRef
                 , currentRound = rRef
-                , lastIntegrationAttempts = aRef }
+                , lastIntegrationAttempts = aRef
+                , nextRoundHints = hRef }
 
 
 setCurrentRound :: Oracle -> Int -> IO ()
@@ -87,6 +94,42 @@ setCurrentRound o n = atomicModifyIORef' (currentRound o) (\_ -> (n, ()))
 
 setLastIntegrationAttempts :: Oracle -> Int -> IO ()
 setLastIntegrationAttempts o n = atomicModifyIORef' (lastIntegrationAttempts o) (\_ -> (n, ()))
+
+
+-- integration phase 开始时清空 hint buffer; integration writeSlot 时累加。
+-- 持久化到 oracle.yaml `next_round_hints` 字段 (hsbb step 是 one-shot 进程, IORef 不能跨进程)。
+resetNextRoundHints :: Oracle -> IO ()
+resetNextRoundHints o = do
+    atomicModifyIORef' (nextRoundHints o) (\_ -> ([], ()))
+    atomicModifyIORef' (oracleState o) $ \v ->
+        (setNextRoundHintsField v [], ())
+    persistOracle o
+
+
+readNextRoundHints :: Oracle -> IO [Text]
+readNextRoundHints o = readIORef (nextRoundHints o)
+
+
+-- 把 hints 列表写入 oracleState 的 next_round_hints 字段
+setNextRoundHintsField :: A.Value -> [Text] -> A.Value
+setNextRoundHintsField (A.Object root) hs =
+    A.Object $ KM.insert "next_round_hints" (A.Array $ V.fromList (map A.String hs)) root
+setNextRoundHintsField v _ = v
+
+
+-- 从 oracleState 读 next_round_hints 字段 (供 initOracle 恢复 IORef)
+readNextRoundHintsField :: A.Value -> [Text]
+readNextRoundHintsField (A.Object root) =
+    case KM.lookup "next_round_hints" root of
+        Just (A.Array a) -> [t | A.String t <- V.toList a]
+        _                -> []
+readNextRoundHintsField _ = []
+
+
+persistOracle :: Oracle -> IO ()
+persistOracle o = do
+    cur <- readIORef (oracleState o)
+    BS.writeFile (oraclePath o) (Y.encode cur)
 
 
 loadOrEmptyYaml :: FilePath -> IO A.Value
@@ -152,9 +195,21 @@ slotLine slots sid =
     let padded = T.justifyLeft 18 ' ' sid
     in case KM.lookup (Key.fromText sid) slots of
         Just (A.Object so) ->
-            let title = textField so "title" "(无标题)"
-                conf  = numberField so "confidence" 0
-            in [ "- " <> padded <> " [" <> formatConf conf <> "]  " <> title ]
+            let title    = textField so "title" "(无标题)"
+                content_ = textField so "content" ""
+                conf     = numberField so "confidence" 0
+                inconN   = truncate (numberField so "inconclusive_count" 0) :: Int
+                tag      = if inconN >= 2
+                           then "[INCONCLUSIVE ×" <> T.pack (show inconN) <> "]"
+                           else "[" <> formatConf conf <> "]"
+                header   = "- " <> padded <> " " <> tag <> "  " <> title
+                -- content 也渲染给 decision LLM (init 的文档推断 + integration 的实测 fact)
+                -- 缩进对齐 + 截断 1200 字符避免单 slot 占满 prompt
+                contentLines =
+                    if T.null (T.strip content_)
+                        then []
+                        else map ("    " <>) (T.lines (T.take 1200 content_))
+            in header : contentLines
         _ -> [ "- " <> padded <> " [EMPTY]  (未填)" ]
 
 
@@ -300,6 +355,20 @@ countProbes :: Oracle -> IO Int
 countProbes o = readIORef (probesCount o)
 
 
+-- 只算 round > 0 的 probe (round = 0 是 init 阶段机械执行的 --help / --version 等).
+countDecisionProbes :: Oracle -> IO Int
+countDecisionProbes o = do
+    txt <- (try (TIO.readFile (probesPath o)) :: IO (Either SomeException Text))
+              >>= either (const (pure "")) pure
+    pure $ length $ filter isDecisionLine $ T.lines txt
+  where
+    isDecisionLine l = case A.decodeStrict (TE.encodeUtf8 l) of
+        Just (A.Object obj) -> case KM.lookup "round" obj of
+            Just (A.Number n) -> (truncate n :: Int) > 0
+            _                 -> False
+        _                   -> False
+
+
 -- Load oracle.yaml from disk (used by belief synthesis to get full content).
 loadOracle :: Oracle -> IO A.Value
 loadOracle o = readIORef (oracleState o)
@@ -347,14 +416,21 @@ referenceProbes o = do
   where
     catMaybes = foldr (\m acc -> case m of Just x -> x : acc; Nothing -> acc) []
 
+    -- 经验法则源自 30 道 PB 任务实测 (2026-06-22):
+    --   - 29/30 canonical 是 --help; 1 真 blocker (容器没起来)
+    --   - 通道分布: 20 stdout / 9 stderr -> 必须 concat 两边再校验
+    --   - exit code 70% 是 0, 30% 是 1/2 -> 不按 exit 过滤
+    --   - 长度 56B (elfcat) ~ 几 KB (ripgrep) -> 阈值降到 50B
+    --   - "usage:" 命中 23/27, "usage of" (Go std) 命中 2/27, flag-line 缩进列表 命中 29/30
     pickByPriority records flags validate =
-        let cands = [ (pid, cmd, content)
+        let cands = [ (pid, cmd, displayContent)
                     | flag <- flags
                     , (pid, cmd, stdout, stderr) <- records
                     , flagMatches cmd flag
-                    , let content = pickContent stdout stderr
-                    , T.length content >= 200
-                    , validate content
+                    , let combined = stdout <> "\n" <> stderr
+                    , T.length combined >= 50
+                    , validate combined
+                    , let displayContent = pickContent stdout stderr
                     ]
         in case cands of
             (x : _) -> Just x
@@ -369,7 +445,26 @@ referenceProbes o = do
 
     isHelpContent t =
         let lower = T.toLower t
-        in any (`T.isInfixOf` lower) ["usage:", "options:", "flags:", "arguments:", "command:"]
+            hasKeyword = any (`T.isInfixOf` lower)
+                [ "usage:"       -- GNU canonical
+                , "usage of"     -- Go std flag (Usage of /path/to/binary:)
+                , "options:"
+                , "flags:"
+                , "arguments:"
+                , "command:"
+                , "summary:"     -- BSD/POSIX (entr 等)
+                , "synopsis:"    -- man-style
+                , "commands:"
+                , "subcommands:"
+                , "examples:"
+                ]
+            -- 缩进 flag 列表: "\n  -" / "\n    -" / "\n\t-" 是 29/30 的兜底信号
+            hasFlagLine = any (`T.isInfixOf` t)
+                [ "\n  -"
+                , "\n    -"
+                , "\n\t-"
+                ]
+        in hasKeyword || hasFlagLine
 
     isVersionContent t =
         let lower = T.toLower t
@@ -464,21 +559,29 @@ writeSlotRaw o sid args now = do
     let isUniversal = sid `elem` universalSlots
     currentState <- readIORef (oracleState o)
     roundN <- readIORef (currentRound o)
-    let isInitPhase  = roundN < 0
-        currentConf  = getCurrentConfidence currentState sid isUniversal
-        currentCount = getCurrentWriteCount currentState sid isUniversal
-        llmValue     = case KM.lookup "confidence" args of
-                         Just (A.Number n) -> realToFrac n :: Double
-                         _                 -> 0
-        newConf      = applyConfidenceDecay currentConf llmValue
+    let isInitPhase    = roundN < 0
+        currentConf    = getCurrentConfidence currentState sid isUniversal
+        currentCount   = getCurrentWriteCount currentState sid isUniversal
+        currentIncon   = getCurrentInconclusiveCount currentState sid isUniversal
+        llmValue       = case KM.lookup "confidence" args of
+                           Just (A.Number n) -> realToFrac n :: Double
+                           _                 -> 0
+        isInconclusive = case KM.lookup "inconclusive" args of
+                           Just (A.Bool b) -> b
+                           _               -> False
+        -- inconclusive=true 时 confidence 不动, 只累加 inconclusive_count
+        newConf      = if isInconclusive then currentConf
+                       else applyConfidenceDecay currentConf llmValue
         delta        = newConf - currentConf
+        newIncon     = if isInconclusive then currentIncon + 1 else currentIncon
         -- init 阶段不算"实际探测", write_count 不递增, last_round 保持 -1 标记
         newCount     = if isInitPhase then currentCount else currentCount + 1
-        argsExtended = KM.insert "confidence"         (A.Number (realToFrac newConf))
-                     $ KM.insert "write_count"        (A.Number (fromIntegral newCount))
-                     $ KM.insert "last_round"         (A.Number (fromIntegral roundN))
-                     $ KM.insert "last_delta"         (A.Number (realToFrac delta))
-                     $ KM.insert "last_proposed_conf" (A.Number (realToFrac llmValue))
+        argsExtended = KM.insert "confidence"           (A.Number (realToFrac newConf))
+                     $ KM.insert "write_count"          (A.Number (fromIntegral newCount))
+                     $ KM.insert "inconclusive_count"   (A.Number (fromIntegral newIncon))
+                     $ KM.insert "last_round"           (A.Number (fromIntegral roundN))
+                     $ KM.insert "last_delta"           (A.Number (realToFrac delta))
+                     $ KM.insert "last_proposed_conf"   (A.Number (realToFrac llmValue))
                        args
     let rec_ = makeSlotRecord argsExtended now
     if isUniversal
@@ -488,6 +591,16 @@ writeSlotRaw o sid args now = do
                 (updateOtherSlot v sid rec_, ())
     cur <- readIORef (oracleState o)
     BS.writeFile (oraclePath o) (Y.encode cur)
+    -- 抽 hint_for_next_round 同步到 IORef + oracle.yaml.next_round_hints 字段
+    -- (hsbb step 是 one-shot 进程, 必须持久才能跨 step 传给下一发 decision)
+    case KM.lookup "hint_for_next_round" args of
+        Just (A.String h) | not (T.null (T.strip h)) -> do
+            newHints <- atomicModifyIORef' (nextRoundHints o) $ \hs ->
+                let hs' = hs ++ [T.strip h] in (hs', hs')
+            atomicModifyIORef' (oracleState o) $ \v ->
+                (setNextRoundHintsField v newHints, ())
+            persistOracle o
+        _ -> pure ()
 
 
 getCurrentWriteCount :: A.Value -> Text -> Bool -> Int
@@ -502,6 +615,31 @@ getCurrentWriteCount (A.Object root) sid True =
                 _ -> 0
         _ -> 0
 getCurrentWriteCount _ _ _ = 0
+
+
+getCurrentInconclusiveCount :: A.Value -> Text -> Bool -> Int
+getCurrentInconclusiveCount (A.Object root) sid True =
+    case KM.lookup "slots" root of
+        Just (A.Object slotsMap) ->
+            case KM.lookup (Key.fromText sid) slotsMap of
+                Just (A.Object so) ->
+                    case KM.lookup "inconclusive_count" so of
+                        Just (A.Number n) -> truncate n
+                        _                 -> 0
+                _ -> 0
+        _ -> 0
+getCurrentInconclusiveCount (A.Object root) sid False =
+    case KM.lookup "other" root of
+        Just (A.Array a) ->
+            case [ truncate n :: Int
+                 | A.Object o <- V.toList a
+                 , KM.lookup "id" o == Just (A.String sid)
+                 , Just (A.Number n) <- [KM.lookup "inconclusive_count" o]
+                 ] of
+                (x:_) -> x
+                _     -> 0
+        _ -> 0
+getCurrentInconclusiveCount _ _ _ = 0
 
 
 -- 衰减公式：每次 probe 单次上升受 0.2 上限 + (1-current) 衰减。

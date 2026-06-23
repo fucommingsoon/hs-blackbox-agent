@@ -7,6 +7,11 @@
 module Blackbox.Loop
     ( runLoop
     , runStep
+    , runShellInDir
+    , probeToJson
+    , mkProbeId
+    , PromptOverrides (..)
+    , emptyOverrides
     ) where
 
 import           Control.Exception       (SomeException, try)
@@ -16,6 +21,7 @@ import           Data.IORef              (atomicModifyIORef', newIORef,
 import qualified Data.Aeson              as A
 import qualified Data.Aeson.Key          as Key
 import qualified Data.Aeson.KeyMap       as KM
+import           Data.List               (find)
 import qualified Data.Text               as T
 import           Data.Text               (Text)
 import qualified Data.Text.Encoding      as TE
@@ -26,15 +32,19 @@ import           System.Exit             (ExitCode (..))
 import           System.FilePath         ((</>))
 import           System.Process          (CreateProcess (..), shell,
                                           readCreateProcessWithExitCode)
+import           System.Timeout          (timeout)
 
 import           Blackbox.Deepseek       (Message (..), runChat,
                                           writeSlotTool,
                                           lookupProbeTool, ChatResult (..))
 import           Blackbox.Oracle         (Oracle, summary, dynamicSection,
                                           appendProbe, countProbes,
+                                          countDecisionProbes,
                                           dispatchTool, lastProbeRecord,
                                           setCurrentRound,
                                           setLastIntegrationAttempts,
+                                          resetNextRoundHints,
+                                          readNextRoundHints,
                                           uniqueProbeCommands,
                                           referenceProbes)
 import           Blackbox.Trace          (TraceHandle, appendEvent,
@@ -42,6 +52,23 @@ import           Blackbox.Trace          (TraceHandle, appendEvent,
 import           Blackbox.Types          (Action (..), LastResult (..),
                                           ProbeOutcome (..), makeLastResult,
                                           parseAction)
+import           Data.Maybe              (fromMaybe)
+
+
+-- ---------------------------------------------------------------
+-- PromptOverrides: 运行时可注入的 system prompt (用于无重编译跑多变体实验)
+-- 4 个 system prompt 字段, 任一为 Nothing 时回退到内置默认.
+-- ---------------------------------------------------------------
+
+data PromptOverrides = PromptOverrides
+    { poDecisionSystem    :: Maybe Text  -- 决策阶段
+    , poIntegrationSystem :: Maybe Text  -- 整理阶段
+    , poGateSystem        :: Maybe Text  -- gate 阶段
+    , poInitSystem        :: Maybe Text  -- init 阶段
+    }
+
+emptyOverrides :: PromptOverrides
+emptyOverrides = PromptOverrides Nothing Nothing Nothing Nothing
 
 
 -- Wall-clock budget in seconds.
@@ -56,10 +83,11 @@ budgetSeconds = 20 * 60
 -- runStep runs exactly one round (decision + optional explore + optional integration)
 -- then exits. Round number derived from probes.jsonl; last_result reconstructed from
 -- the latest probe if any.
-runStep :: Oracle -> Text -> Text -> FilePath -> TraceHandle -> IO ()
-runStep oracle apiKey model taskDir trace = do
-    nProbes <- countProbes oracle
-    let roundN = nProbes + 1
+runStep :: Oracle -> Text -> Text -> FilePath -> TraceHandle -> PromptOverrides -> IO ()
+runStep oracle apiKey model taskDir trace overrides = do
+    -- 用 countDecisionProbes 而不是 countProbes: init 阶段的机械 probe (round=0) 不计入 round 编号
+    nDec <- countDecisionProbes oracle
+    let roundN = nDec + 1
     lastResult <- reconstructLastResult oracle
     putStrLn $ "[step] round " ++ show roundN
                 ++ (case lastResult of
@@ -71,7 +99,7 @@ runStep oracle apiKey model taskDir trace = do
 
     phaseStart trace (roundTag <> "_decision")
     putStrLn "[step] decision phase..."
-    action <- decisionPhase oracle apiKey model trace roundN lastResult
+    action <- decisionPhase oracle apiKey model trace roundN lastResult overrides
     phaseEnd trace (roundTag <> "_decision")
 
     case action of
@@ -99,11 +127,11 @@ runStep oracle apiKey model taskDir trace = do
                     let lr = makeLastResult pid po
                     phaseStart trace (roundTag <> "_integration")
                     putStrLn "[step] integration phase..."
-                    integrationPhase oracle apiKey model trace roundN act lr
+                    integrationPhase oracle apiKey model trace roundN act lr overrides
                     phaseEnd trace (roundTag <> "_integration")
                     phaseStart trace (roundTag <> "_gate")
                     putStrLn "[step] gate phase..."
-                    cont <- gatePhase oracle apiKey model trace roundN
+                    cont <- gatePhase oracle apiKey model trace roundN overrides
                     phaseEnd trace (roundTag <> "_gate")
                     if cont
                         then putStrLn "[step] gate 判 继续 (本步退出, 下次再调 step)"
@@ -149,8 +177,8 @@ reconstructLastResult o = do
 -- Original full loop
 -- ---------------------------------------------------------------
 
-runLoop :: Oracle -> Text -> Text -> FilePath -> TraceHandle -> IO ()
-runLoop oracle apiKey model taskDir trace = do
+runLoop :: Oracle -> Text -> Text -> FilePath -> TraceHandle -> PromptOverrides -> IO ()
+runLoop oracle apiKey model taskDir trace overrides = do
     startTime <- getCurrentTime
     phaseStart trace "loop"
     loop startTime 1 Nothing
@@ -172,7 +200,7 @@ runLoop oracle apiKey model taskDir trace = do
                     pad3 k = let s = show k in replicate (3 - length s) '0' ++ s
                 putStrLn $ "[round " ++ show roundN ++ "] decision phase..."
                 phaseStart trace (roundTag <> "_decision")
-                action <- decisionPhase oracle apiKey model trace roundN lastResult
+                action <- decisionPhase oracle apiKey model trace roundN lastResult overrides
                 phaseEnd trace (roundTag <> "_decision")
                 case action of
                     Nothing -> do
@@ -200,12 +228,12 @@ runLoop oracle apiKey model taskDir trace = do
                                 let lr = makeLastResult pid po
                                 phaseStart trace (roundTag <> "_integration")
                                 putStrLn $ "[round " ++ show roundN ++ "] integration phase..."
-                                integrationPhase oracle apiKey model trace roundN act lr
+                                integrationPhase oracle apiKey model trace roundN act lr overrides
                                 phaseEnd trace (roundTag <> "_integration")
                                 -- Gate 判断收敛
                                 phaseStart trace (roundTag <> "_gate")
                                 putStrLn $ "[round " ++ show roundN ++ "] gate phase..."
-                                cont <- gatePhase oracle apiKey model trace roundN
+                                cont <- gatePhase oracle apiKey model trace roundN overrides
                                 phaseEnd trace (roundTag <> "_gate")
                                 if cont
                                     then loop startT (roundN + 1) (Just lr)
@@ -232,14 +260,20 @@ mkProbeId n = pure (T.pack ("probe_" ++ pad3 n))
 -- Decision phase
 -- ---------------------------------------------------------------
 
-decisionPhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> Maybe LastResult -> IO (Maybe Action)
-decisionPhase oracle apiKey model trace roundN lastResult = do
+decisionPhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> Maybe LastResult -> PromptOverrides -> IO (Maybe Action)
+decisionPhase oracle apiKey model trace roundN lastResult overrides = do
     summaryTxt <- summary oracle
     dynamicTxt <- dynamicSection oracle roundN
     nProbes <- countProbes oracle
     pastCmds <- uniqueProbeCommands oracle
     refs <- referenceProbes oracle
+    hints <- readNextRoundHints oracle
     let lrSection = maybe "(无)\n" renderLastResult lastResult
+        hintsSection = if null hints
+                       then ""
+                       else "\n## 上发 integration 给本发的 hint (actionable, 一次性)\n"
+                         <> T.unlines [ "- " <> h | h <- hints ]
+                         <> "\n"
         probeStats = "\n## 探针计数\n本任务已发 probe 数: " <> T.pack (show nProbes)
                   <> "\n历史参考: 同类案例平均 ~70 发, 范围 10-200, 具体探多少自行判断。\n"
         refsSection = if null refs
@@ -253,16 +287,38 @@ decisionPhase oracle apiKey model trace roundN lastResult = do
                       then ""
                       else "\n## 已执行过的 probe (去重)\n"
                         <> T.unlines [ "- " <> c | c <- pastCmds ]
-        sysPrompt = decisionSystemPrompt
+        sysPrompt = fromMaybe decisionSystemPrompt (poDecisionSystem overrides)
         userPrompt = summaryTxt <> "\n" <> dynamicTxt <> refsSection <> probeStats <> pastSection
                   <> "\n## 上轮回灌 (last_result)\n" <> lrSection
+                  <> hintsSection
                   <> "\n## 你的任务\n基于以上, 决定下一步 action, 直接输出 action JSON。"
         msgs = [ SystemMsg sysPrompt, UserMsg userPrompt ]
 
     result <- runChat apiKey model [] {- 决策阶段不暴露任何 tool -}
                 msgs (dispatchTool oracle) (appendEvent trace) 2
 
-    pure (parseActionFromText (crContent result))
+    let firstAction = parseActionFromText (crContent result)
+    -- 硬拦: 若 LLM 出 verbatim 已执行 cmd 且 why 没声明「重复 probe_xxx」, retry 一次喂 feedback.
+    case firstAction of
+        Just (ActProbe cmd why)
+            | cmd `elem` pastCmds && not (isExplicitRepeat why) -> do
+                putStrLn $ "[decision] WARN: LLM emitted duplicate cmd: " ++ T.unpack cmd
+                appendEvent trace "decision_duplicate_rejected" (A.object
+                    [ "cmd"        A..= cmd
+                    , "why"        A..= why
+                    , "retry_with" A..= ("feedback" :: Text)
+                    ])
+                let feedback = "harness 拒绝: cmd `" <> cmd
+                            <> "` 在「已执行过的 probe」段里已 verbatim 出现过, 重发等于浪费一发。"
+                            <> "\n请换角度探。若确认要重复 (验证非确定性等), 在 why 字段写「重复 probe_xxx, 因为...」即可绕过本拦截。"
+                    retryMsgs = msgs ++ [ AssistantMsg (Just (crContent result)) []
+                                        , UserMsg feedback ]
+                retry <- runChat apiKey model [] retryMsgs
+                            (dispatchTool oracle) (appendEvent trace) 2
+                pure (parseActionFromText (crContent retry))
+        _ -> pure firstAction
+  where
+    isExplicitRepeat why = "重复 probe_" `T.isInfixOf` why
 
 
 parseActionFromText :: Text -> Maybe Action
@@ -300,15 +356,18 @@ extractJsonObject t =
 -- Integration phase
 -- ---------------------------------------------------------------
 
-integrationPhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> Action -> LastResult -> IO ()
-integrationPhase oracle apiKey model trace roundN lastAction lr = do
+integrationPhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> Action -> LastResult -> PromptOverrides -> IO ()
+integrationPhase oracle apiKey model trace roundN lastAction lr overrides = do
     setCurrentRound oracle roundN
+    -- 清空上发 integration 给本发的 hint (本发 integration 会重新累加给下一发)
+    resetNextRoundHints oracle
     summaryTxt <- summary oracle
     let actJson = actionJson lastAction
         userPrompt = summaryTxt <> "\n\n## 上轮 action\n" <> actJson
                   <> "\n\n## 上轮回灌 (last_result)\n" <> renderLastResult lr
                   <> "\n\n## 你的任务\n" <> integrationTask
-        msgs = [ SystemMsg integrationSystemPrompt, UserMsg userPrompt ]
+        msgs = [ SystemMsg (fromMaybe integrationSystemPrompt (poIntegrationSystem overrides))
+               , UserMsg userPrompt ]
 
     -- 机械限制: 本次 integration 只采纳第一个 writeSlot
     writeSlotCounter <- newIORef (0 :: Int)
@@ -335,8 +394,8 @@ integrationPhase oracle apiKey model trace roundN lastAction lr = do
 -- Gate phase
 -- ---------------------------------------------------------------
 
-gatePhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> IO Bool
-gatePhase oracle apiKey model trace _roundN = do
+gatePhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> PromptOverrides -> IO Bool
+gatePhase oracle apiKey model trace _roundN overrides = do
     summaryTxt <- summary oracle
     nProbes <- countProbes oracle
     let probeStats = "\n## 探针计数\n本任务已发 probe 数: " <> T.pack (show nProbes)
@@ -344,7 +403,8 @@ gatePhase oracle apiKey model trace _roundN = do
         userPrompt = summaryTxt <> probeStats
                   <> "\n## 你的任务\n判断信息是否足够收敛。直接输出 JSON: "
                   <> "{\"continue\": true / false, \"why\": \"...\"}"
-        msgs = [ SystemMsg gateSystemPrompt, UserMsg userPrompt ]
+        msgs = [ SystemMsg (fromMaybe gateSystemPrompt (poGateSystem overrides))
+               , UserMsg userPrompt ]
 
     result <- runChat apiKey model []
                 msgs (dispatchTool oracle) (appendEvent trace) 2
@@ -400,22 +460,92 @@ executeAction taskDir (ActOther _ cmd _) = do
 executeAction _ (ActStop _) = pure Nothing
 
 
+-- ---------------------------------------------------------------
+-- Docker wrapper detection + cmd rewrite
+-- ---------------------------------------------------------------
+--
+-- 背景: PB task wrapper 形如
+--   timeout 6 docker exec -i <container> /workspace/executable "$@"
+-- 直接跑 LLM cmd 会让 host shell 解析整条 cmd, 导致 `touch /tmp/F` 在 host /tmp,
+-- container 内 entr 在 container /tmp 找不到 → fixture namespace 失配。
+--
+-- 改造: 检测 task dir 下 `probe` 是否 docker wrapper, 是则:
+--   1. cmd 字符串里 `./probe` 替换为容器内 binary 路径
+--   2. 整条 cmd 用 `docker exec <c> bash -c '<rewritten>'` 进容器跑
+--   3. 容器内 `timeout 5` 包裹防 LLM 阻塞 cmd 卡死
+--   4. host 侧 hsbb 再包 System.Timeout 30s 兜底 (防 docker client 自己卡)
+
+-- 解析 wrapper 拿 (container_name, internal_binary_path)。
+-- wrapper 行例: "timeout 6 docker exec -i pbref-real-entr /workspace/executable \"$@\""
+parseDockerWrapper :: Text -> Maybe (Text, Text)
+parseDockerWrapper body =
+    let lns = T.lines body
+        dockerLine = find ("docker exec" `T.isInfixOf`) lns
+    in case dockerLine of
+        Nothing -> Nothing
+        Just l ->
+            let toks       = T.words l
+                afterExec  = drop 1 $ dropWhile (/= "exec") toks
+                afterFlags = dropWhile ("-" `T.isPrefixOf`) afterExec
+            in case afterFlags of
+                (container : rest) ->
+                    case dropWhile ("-" `T.isPrefixOf`) rest of
+                        (binary : _) -> Just (container, binary)
+                        _            -> Nothing
+                _ -> Nothing
+
+-- shell single-quote escape: ' → '\''
+shSingleQuote :: Text -> Text
+shSingleQuote t = "'" <> T.replace "'" "'\\''" t <> "'"
+
+-- 给定 cmd 和 task dir, 决定真正要交给 host shell 跑的 cmd。
+-- 若 task 是 docker wrapper 且 cmd 真的调用 ./probe, 重写为 docker exec 形态。
+-- 不含 ./probe 的 cmd (grep / ls / file 等纯 host 操作) 留在 host shell 跑。
+rewriteForDocker :: FilePath -> Text -> IO Text
+rewriteForDocker dir cmd
+    | not ("./probe" `T.isInfixOf` cmd) = pure cmd
+    | otherwise = do
+        let wrapperPath = dir </> "probe"
+        exists <- doesFileExist wrapperPath
+        if not exists
+            then pure cmd
+            else do
+                body <- TIO.readFile wrapperPath
+                case parseDockerWrapper body of
+                    Nothing -> pure cmd
+                    Just (container, binary) ->
+                        let cmdRewritten = T.replace "./probe" binary cmd
+                            innerWithTimeout = "timeout 5 bash -c " <> shSingleQuote cmdRewritten
+                        in pure $ "docker exec -i " <> container <> " " <> innerWithTimeout
+
+
 runShellInDir :: FilePath -> Text -> IO (Maybe ProbeOutcome)
 runShellInDir dir cmd = do
     t0 <- getCurrentTime
-    (ec, out, err) <- readCreateProcessWithExitCode
-        ((shell (T.unpack cmd)) { cwd = Just dir }) ""
+    realCmd <- rewriteForDocker dir cmd
+    let runIt = readCreateProcessWithExitCode
+                  ((shell (T.unpack realCmd)) { cwd = Just dir }) ""
+    -- host 侧 30s 兜底 (docker client 卡死 / network 卡死)
+    mResult <- timeout (30 * 1000000) runIt
     t1 <- getCurrentTime
     let durMs = round (1000 * realToFrac (diffUTCTime t1 t0) :: Double) :: Int
-    pure $ Just ProbeOutcome
-        { poCmd        = cmd
-        , poExit       = case ec of
-                            ExitSuccess     -> 0
-                            ExitFailure n   -> n
-        , poStdout     = T.pack out
-        , poStderr     = T.pack err
-        , poDurationMs = durMs
-        }
+    case mResult of
+        Just (ec, out, err) -> pure $ Just ProbeOutcome
+            { poCmd        = cmd
+            , poExit       = case ec of
+                                ExitSuccess   -> 0
+                                ExitFailure n -> n
+            , poStdout     = T.pack out
+            , poStderr     = T.pack err
+            , poDurationMs = durMs
+            }
+        Nothing -> pure $ Just ProbeOutcome
+            { poCmd        = cmd
+            , poExit       = 124
+            , poStdout     = ""
+            , poStderr     = "HSBB_TIMEOUT: cmd exceeded 30s host wall-clock budget"
+            , poDurationMs = durMs
+            }
 
 
 -- ---------------------------------------------------------------
@@ -475,18 +605,26 @@ actionJson (ActStop w) = "{\"action\":\"stop\",\"why\":\"" <> w <> "\"}"
 
 decisionSystemPrompt :: Text
 decisionSystemPrompt = T.unlines
-    [ "你是黑盒探测 agent 的决策阶段。"
-    , "看完 oracle 摘要（title + confidence）+ 上轮回灌, 决定下一步 action。"
+    [ "在探索一个黑盒: 通过反复调用 `./probe <args>` 从它的 exit/stdout/stderr 推断真实行为。"
+    , "本步: 读 user prompt 各段, 输出下一发要做什么 (action JSON)。"
     , ""
-    , "oracle 摘要已是 harness 投影好的全部视图——**不需要任何 tool 去拉 oracle 槽位细节**。"
+    , "**执行环境**: 你写的整条 cmd 在 Linux container (debian-slim) 内跑, GNU coreutils, bash 5。"
+    , "fixture (touch / echo > /tmp/X) 与 probe 同 namespace, 路径一致, 不必 docker exec。"
+    , "cmd 被 timeout 5s 包裹, 超时 (exit=124) 仍会收到 stdout — 拿到信号就够。"
     , ""
-    , "action 协议（**强制只用 ./probe**, 不要 ./pingu/./rg/./dsq 等真实工具名——probe 是 wrapper）："
-    , "  探一发：{\"action\":\"probe\",\"cmd\":\"./probe <args>\",\"why\":\"...\"}"
-    , "  搜源码：{\"action\":\"grep\",\"pattern\":\"...\",\"files\":[\"path\"],\"why\":\"...\"}"
-    , "  其他：  {\"action\":\"other\",\"kind\":\"shell/http/docker\",\"cmd\":\"...\",\"why\":\"...\"}"
+    , "action 协议:"
+    , "  探一发: {\"action\":\"probe\",\"cmd\":\"./probe <args>\",\"why\":\"<推理依据>\"}"
+    , "  搜源码: {\"action\":\"grep\",\"pattern\":\"<regex>\",\"files\":[\"<path>\"],\"why\":\"...\"}"
+    , "  其他:   {\"action\":\"other\",\"kind\":\"shell/http/docker\",\"cmd\":\"<cmd>\",\"why\":\"...\"}"
     , ""
-    , "**收敛判断不归你管, 由独立 Gate 节点决定; 你**只**出探索 action**, 不要出 stop**。"
-    , "**最后只输出 action JSON, 不要前置 prose。**"
+    , "why 字段 = 这一发的推理依据 + 目标槽位。两块:"
+    , "  1) 假设 / 意图: 我猜 X, 或想验证 Y (跟过去 probe 关系也写这里)"
+    , "  2) 目标槽: 这发应影响哪个 slot (identity / cli_flags / io_channels / exit_codes / error_buckets / impl_fingerprint / known_unknowns / 自定义 other id)"
+    , ""
+    , "范例: \"假设: -a 是文档列出的有效 flag, 应被 entr 解析器接受. 目标: cli_flags.\""
+    , ""
+    , "**不要预设 last_result 长什么样**。结果空间是开放的, 实际看到啥就是啥, 整理阶段会读 why 的假设 + 实际 result 自由判定。"
+    , "硬塞 \"符合 / 反例\" 二元分支等于剥夺整理阶段处理意外结果的能力。"
     ]
 
 
@@ -511,17 +649,58 @@ integrationSystemPrompt = T.unlines
     , "  Bad (forbidden): 'Tool identity' / 'CLI flags' / 'I/O channels' — these empty labels are not allowed."
     , "  In the integration phase, title should incorporate the **new facts revealed by last_result**, not just doc facts."
     , ""
-    , "oracle 摘要已在 user prompt 给你（title + confidence）。要写哪个槽自己判断。"
+    , "**content is critical**: bullet-list of high-density factual statements (probe-observed, not doc-paraphrased)."
+    , "  Each bullet = one verified fact or precise behavior, ideally with ← probe_id evidence."
+    , "  Good:"
+    , "    - exit 2 on --foo (unknown flag) ← probe_007"
+    , "    - stdout: HTTP body / stderr: progress + errors"
+    , "    - -print=H/B/h/b/A: H=resp header, B=resp body, h=req header, b=req body, A=all ← probe_014"
+    , "    - --version: exit 2, stdout='Version 0.1.0' (Go-flag style) ← probe_002"
+    , "  Bad (forbidden):"
+    , "    - 'This tool is a Go-based CLI for HTTP requests, similar to cURL...' (prose narrative)"
+    , "    - 'Generally produces output to stdout' (vague, no specific behavior)"
+    , "    - 'Supports authentication and proxy' (doc paraphrase, not observation)"
+    , "    - '13 flags' (count alone, no flag specifics)"
     , ""
-    , "若 last_result 揭示新事实 → 发 writeSlot tool calls 落槽（写新 / 整体替换旧的均可）。"
-    , "若 last_result 无新意 → 不发 writeSlot, 直接简短总结。"
+    , "oracle 摘要已在 user prompt 给你（title + confidence）。决策阶段的 action.why 字段会指明本发的假设 + 目标槽。"
+    , ""
+    , "**自由判定 last_result 真实呈现的状态**, 按下面分类落 writeSlot:"
+    , "  - 验证型: last_result 确认 why 假设 (init 推断被实测吻合)"
+    , "    → writeSlot 同 slot_id, 复用或微调 title/content, **提升 confidence** (init 的 conf=0 槽位通过这条升上来)"
+    , "  - 新事实型: last_result 揭示文档/init 没说的细节 (也包括: 假设确认但结果暴露了未覆盖的角度, 比如缺少前置条件)"
+    , "    → writeSlot 落槽, 新事实写入 title/content"
+    , "  - 冲突型: last_result 反驳目标槽或其他 slot 现有 title/content"
+    , "    → writeSlot 修正"
+    , "  - 完全无关: last_result 跟 why 声明的目标无关"
+    , "    → 不发 tool call, 一句话总结"
+    , ""
+    , "**关键**: 不要把\"验证型\"误判为\"无新意\"。验证就是 conf 从 0 升上来的唯一路径。"
+    , ""
+    , "**inconclusive 标记** (诚实标失败胜过外推):"
+    , "  当 action.why 声明的目标槽是 X, 但 last_result 完全没给出能落到 X 的信号"
+    , "  (比如 cmd 形态选错 / 工具拒收输入 / stdout 空 + stderr 无 actionable hint),"
+    , "  调用 writeSlot 时除常规字段, 设 `inconclusive: true`。"
+    , "  效果: confidence 不动, slot 的 inconclusive_count 累加。"
+    , "  当某槽 inconclusive_count ≥ 2, oracle summary 自动标 [INCONCLUSIVE ×N], decision 阶段会避开。"
+    , "  这是显式承认\"这个角度暂时探不出\"的合法路径——好过硬塞外推或反复试同一槽。"
+    , ""
+    , "**hint_for_next_round 字段** (传 actionable 信号给下一发):"
+    , "  当 last_result.stderr/stdout 含**只对下一发 cmd 形态/方向有意义**但不是 slot fact 的信号"
+    , "  (例: stderr 暗示 'use -n' / 工具要求真实文件路径 / 某 flag 是 single-shot 无需 trigger / 缺前置条件),"
+    , "  调用 writeSlot 时附 `hint_for_next_round: \"<≤120 字的可执行一句话>\"`。"
+    , "  hsbb 会把它显式塞进下一发 decision 的 user prompt, LLM 直接看到, 不用自己再 grep stderr。"
+    , "  hint 只活一发 (下一发 integration 开始时清空)。"
+    , "  反例 (不要写): 复述 slot title/content; 长段分析; 跟下一发 cmd 选择无关的解释。"
     ]
 
 
 integrationTask :: Text
 integrationTask = T.unlines
-    [ "看 last_result, 比对 oracle 现有槽:"
-    , "  - 有新事实 → writeSlot 落槽 (evidence 至少含 " <> "本轮 probe_id)"
-    , "  - 有冲突 → readSlot 看详情后 writeSlot 修正"
-    , "  - 无新意 → 不发 tool call, 一句话总结即可"
+    [ "看 action.why 中声明的「目标槽 + 预期」, 比对 last_result:"
+    , "  - 符合假设 (验证型) → writeSlot 同槽位, 提升 confidence (evidence 含本轮 probe_id)"
+    , "  - 揭示新事实 → writeSlot 落槽 (新事实写入 title/content)"
+    , "  - 反驳现有槽 (冲突型) → writeSlot 修正"
+    , "  - 跟 why 声明完全无关 → 不发 tool call, 一句话总结"
+    , ""
+    , "**默认是验证型** (大部分 probe 是验证文档推断), 不要把验证误判为「无新意」。"
     ]

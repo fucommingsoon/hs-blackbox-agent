@@ -1,12 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- Init phase: read task docs, call Deepseek once to digest them into oracle slots.
+-- Init phase:
+--   1) mechanically run `./probe --help` and `./probe --version`, write to probes.jsonl (round=0)
+--   2) call Deepseek once with docs + the mechanical probe outputs, to digest into oracle slots
 module Blackbox.Init
     ( runInit
     ) where
 
 import           Control.Exception       (SomeException, try)
 import qualified Data.Aeson              as A
+import           Data.Maybe              (catMaybes, fromMaybe)
 import qualified Data.Text               as T
 import           Data.Text               (Text)
 import qualified Data.Text.IO            as TIO
@@ -14,13 +17,17 @@ import           System.Directory        (doesFileExist, listDirectory)
 import           System.FilePath         ((</>), takeExtension)
 
 import           Blackbox.Deepseek       (Message (..), runChat, writeSlotTool)
-import           Blackbox.Oracle         (Oracle, dispatchTool)
+import           Blackbox.Loop           (runShellInDir, probeToJson,
+                                          PromptOverrides (..))
+import           Blackbox.Oracle         (Oracle, dispatchTool, appendProbe,
+                                          resetNextRoundHints)
 import           Blackbox.Trace          (TraceHandle, appendEvent,
                                           phaseStart, phaseEnd)
+import           Blackbox.Types          (ProbeOutcome (..))
 
 
-runInit :: Oracle -> Text -> Text -> FilePath -> TraceHandle -> IO ()
-runInit oracle apiKey model taskDir trace = do
+runInit :: Oracle -> Text -> Text -> FilePath -> TraceHandle -> PromptOverrides -> IO ()
+runInit oracle apiKey model taskDir trace overrides = do
     putStrLn "[init] reading docs..."
     docs <- collectDocs taskDir
     let docsBlob = renderDocs docs
@@ -32,16 +39,78 @@ runInit oracle apiKey model taskDir trace = do
         , "docs_total_chars" A..= sum (map (T.length . snd) docs)
         ])
 
-    let sysPrompt = initSystemPrompt
-        userPrompt = "## 任务文档\n" <> docsBlob <> "\n\n## 你的任务\n" <> initUserPrompt
+    -- 1) fs context probes — 看 task 目录 / binary 类型 / 环境
+    --    (跑在 host shell, 不进 docker container; rewriteForDocker 会自动 skip)
+    putStrLn "[init] running fs context probes: ls -la, file ./probe"
+    fsLs   <- runShellInDir taskDir "ls -la ."
+    fsFile <- runShellInDir taskDir "file ./probe"
+
+    -- 2) 一发 --help 当 canonical 自我介绍 (跨 task 几乎都支持; 去掉之前 -h/-?/-V/-v/--version 5 个重复 alias)
+    putStrLn "[init] running mechanical --help"
+    helpOutcome <- runShellInDir taskDir "./probe --help"
+
+    let recordInitProbe pid po = do
+            appendProbe oracle (probeToJson pid 0 po)
+            appendEvent trace "probe_appended" (A.object
+                [ "round"        A..= (0 :: Int)
+                , "probe_id"     A..= pid
+                , "init_probe"   A..= True
+                , "exit"         A..= poExit po
+                , "stdout_bytes" A..= T.length (poStdout po)
+                , "stderr_bytes" A..= T.length (poStderr po)
+                ])
+    case fsLs of
+        Just po -> recordInitProbe "probe_init_fs_ls" po
+        Nothing -> pure ()
+    case fsFile of
+        Just po -> recordInitProbe "probe_init_fs_file" po
+        Nothing -> pure ()
+    case helpOutcome of
+        Just po -> recordInitProbe "probe_init_help" po
+        Nothing -> pure ()
+
+    let fsContext = renderInitProbes
+            [ ("ls -la .", fsLs)
+            , ("file ./probe", fsFile)
+            ]
+        preProbesSection = renderInitProbes [ ("./probe --help", helpOutcome) ]
+        sysPrompt = fromMaybe initSystemPrompt (poInitSystem overrides)
+        userPrompt = "## 任务文档\n" <> docsBlob
+                  <> "\n\n## fs 上下文 (init 阶段看到的环境)\n" <> fsContext
+                  <> "\n\n## 实测自我介绍 (init 阶段已机械执行 --help)\n" <> preProbesSection
+                  <> "\n\n## 你的任务\n" <> initUserPrompt
         msgs = [ SystemMsg sysPrompt, UserMsg userPrompt ]
 
-    putStrLn "[init] calling Deepseek to digest docs..."
+    putStrLn "[init] calling Deepseek to digest docs + fs context + --help ..."
     _ <- runChat apiKey model [writeSlotTool]
             msgs (dispatchTool oracle) (appendEvent trace) 6
 
+    -- defensive: 清掉 init phase LLM 顺手在 writeSlot 里写的 hint
+    -- (init 阶段不该有"上发 cmd 给本发的 hint", 因为本发就是第一发)
+    resetNextRoundHints oracle
+
     phaseEnd trace "init"
     putStrLn "[init] done."
+
+
+-- 渲染 init phase 跑过的 cmd 结果。
+-- label 是完整 cmd 字符串 (例: "./probe --help" / "ls -la .")。
+renderInitProbes :: [(Text, Maybe ProbeOutcome)] -> Text
+renderInitProbes labelOutcomes = T.unlines $ catMaybes (map render1 labelOutcomes)
+  where
+    render1 (_,     Nothing) = Nothing
+    render1 (label, Just po) = Just $ T.unlines
+        [ "### $ " <> label
+        , "exit: " <> T.pack (show (poExit po))
+        , "stdout:"
+        , "```"
+        , T.take 8000 (poStdout po)
+        , "```"
+        , "stderr:"
+        , "```"
+        , T.take 4000 (poStderr po)
+        , "```"
+        ]
 
 
 initSystemPrompt :: Text

@@ -96,7 +96,7 @@ writeSlotTool = A.object
                 , "title"      A..= A.object [ "type" A..= ("string" :: Text)
                                              , "description" A..= ("One info-dense sentence. Must include concrete name/version/counts/key flags/quirks. **No empty labels like 'CLI flags' / 'Tool identity'.** Good: 'yj 5.1.0 (Go binary, std flag parser, 4-format converter)' / '20 single-letter flags, no long form, -x[x] 4x4 conversion matrix' / 'stdin->stdout, usage on stderr, exit 1 on bad flag'" :: Text) ]
                 , "content"    A..= A.object [ "type" A..= ("string" :: Text)
-                                             , "description" A..= ("Full fact, multi-line OK" :: Text) ]
+                                             , "description" A..= ("High-density factual statements as bullet list. Each line = one probe-observed fact or precise behavior, ideally with ← probe_id evidence. NO prose narration, NO doc paraphrase. Good: 'exit 2 on --foo (unknown flag) ← probe_007' / 'stdout: HTTP body / stderr: progress' / '-print=H/B/h/b/A: H=resp header, B=body, h=req header...'. Bad (forbidden): 'This tool is a Go-based CLI...' (narrative) / 'Generally produces output to stdout' (vague) / 'Supports authentication' (doc paraphrase, not observation)" :: Text) ]
                 , "confidence" A..= A.object [ "type" A..= ("number" :: Text)
                                              , "description" A..= ("0.0 to 1.0" :: Text) ]
                 , "evidence"   A..= A.object [ "type" A..= ("array" :: Text)
@@ -106,6 +106,14 @@ writeSlotTool = A.object
                                              , "description" A..= ("optional caveat" :: Text) ]
                 , "index"      A..= A.object [ "type" A..= ("integer" :: Text)
                                              , "description" A..= ("optional, only for 'other' entries" :: Text) ]
+                , "inconclusive" A..= A.object
+                    [ "type" A..= ("boolean" :: Text)
+                    , "description" A..= ("optional. Set true when this probe targeted this slot but failed to yield a conclusive signal (探了但 stdout/stderr 给不出明确事实). Slot 的 confidence 不被加, 但 inconclusive_count 累加. 当 inconclusive_count >= 2 后, oracle summary 会标 [INCONCLUSIVE], decision 阶段就不该再反复试同一槽。诚实标 inconclusive 比硬塞外推强。" :: Text)
+                    ]
+                , "hint_for_next_round" A..= A.object
+                    [ "type" A..= ("string" :: Text)
+                    , "description" A..= ("optional. 给下一发 decision LLM 的 actionable 一句话, 不是 slot fact。用于把 last_result 中只对‘下一发 cmd 形态/方向’有意义的信号显式传过去——例如 stderr 暗示 'use -n' / 工具要求真实文件路径 / 当前 fixture 用错路径 / 某 flag 是 single-shot 不需要 trigger。**只写跟下一发 cmd 选择直接相关的可执行建议**, 不要复述 slot 内容。一句话, 长度 ≤ 120 字符。" :: Text)
+                    ]
                 ]
             , "required" A..= (["slot_id", "title", "content", "confidence"] :: [Text])
             ]
@@ -159,9 +167,13 @@ runChat apiKey model tools msgs0 toolHandler trace maxRounds =
         | n >= maxRounds = pure (ChatResult "" [] msgs)
         | otherwise = do
             trace "llm_request" (A.object
-                [ "round"    A..= n
-                , "messages" A..= map messageToJson msgs
-                , "tools"    A..= tools
+                [ "round"       A..= n
+                , "messages"    A..= map messageToJson msgs
+                , "tools"       A..= tools
+                  -- API 调用参数 (跟 postChat 里硬编码值保持一致, 便于审计)
+                , "model"       A..= model
+                , "temperature" A..= (0.3 :: Double)
+                , "max_tokens"  A..= (2000 :: Int)
                 ])
             resp <- callOnce apiKey model tools msgs
             case resp of
@@ -232,6 +244,8 @@ postChat apiKey model tools msgs = do
             [ "tools"      A..= tools
             , "tool_choice" A..= ("auto" :: Text)
             ]
+    -- AUDIT: 每发请求体 append 到 /tmp/hsbb_bodies.jsonl, 一行一个
+    BL.appendFile "/tmp/hsbb_bodies.jsonl" (body <> "\n")
     req0 <- parseRequest "https://api.deepseek.com/chat/completions"
     let req = req0
             { method         = "POST"
