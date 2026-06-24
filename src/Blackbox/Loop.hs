@@ -44,9 +44,11 @@ import           Blackbox.Oracle         (Oracle, summary, dynamicSection,
                                           setCurrentRound,
                                           setLastIntegrationAttempts,
                                           resetNextRoundHints,
-                                          readNextRoundHints,
-                                          uniqueProbeCommands,
-                                          referenceProbes)
+                                         readNextRoundHints,
+                                         uniqueProbeCommands,
+                                         probeHistorySummary,
+                                         slotConfidences,
+                                         referenceProbes)
 import           Blackbox.Trace          (TraceHandle, appendEvent,
                                           phaseStart, phaseEnd)
 import           Blackbox.Types          (Action (..), LastResult (..),
@@ -266,6 +268,7 @@ decisionPhase oracle apiKey model trace roundN lastResult overrides = do
     dynamicTxt <- dynamicSection oracle roundN
     nProbes <- countProbes oracle
     pastCmds <- uniqueProbeCommands oracle
+    history <- probeHistorySummary oracle
     refs <- referenceProbes oracle
     hints <- readNextRoundHints oracle
     let lrSection = maybe "(无)\n" renderLastResult lastResult
@@ -284,11 +287,16 @@ decisionPhase oracle apiKey model trace roundN lastResult overrides = do
                              <> T.take 8192 content <> "\n```"
                            | (pid, cmd, content) <- refs ]
         pastSection = if null pastCmds
-                      then ""
-                      else "\n## 已执行过的 probe (去重)\n"
-                        <> T.unlines [ "- " <> c | c <- pastCmds ]
+                     then ""
+                     else "\n## 已执行过的 probe (去重)\n"
+                       <> T.unlines [ "- " <> c | c <- pastCmds ]
+        historySection = if null history
+                         then ""
+                         else "\n## 探索历史 (最近 " <> T.pack (show (length history)) <> " 发, 含结果浓缩)\n"
+                           <> T.unlines (map renderHistoryEntry history)
         sysPrompt = fromMaybe decisionSystemPrompt (poDecisionSystem overrides)
         userPrompt = summaryTxt <> "\n" <> dynamicTxt <> refsSection <> probeStats <> pastSection
+                  <> historySection
                   <> "\n## 上轮回灌 (last_result)\n" <> lrSection
                   <> hintsSection
                   <> "\n## 你的任务\n基于以上, 决定下一步 action, 直接输出 action JSON。"
@@ -352,6 +360,16 @@ extractJsonObject t =
     findMatchingBrace pos d (_ : cs)   = findMatchingBrace (pos + 1) d cs
 
 
+renderHistoryEntry :: (Int, Text, Int, Text, Text, Int, Int) -> Text
+renderHistoryEntry (rnd, cmd_, exit_, soSlice, seSlice, soBytes, seBytes) =
+    "- [r" <> T.pack (show rnd) <> "] " <> cmd_ <> " -> exit " <> T.pack (show exit_)
+    <> " | stdout(" <> T.pack (show soBytes) <> "B): " <> flatOrEmpty soSlice
+    <> " | stderr(" <> T.pack (show seBytes) <> "B): " <> flatOrEmpty seSlice
+  where
+    flatOrEmpty t = let s = T.strip t
+                    in if T.null s then "(empty)" else T.replace "\n" " " s
+
+
 -- ---------------------------------------------------------------
 -- Integration phase
 -- ---------------------------------------------------------------
@@ -367,17 +385,18 @@ integrationPhase oracle apiKey model trace roundN lastAction lr overrides = do
                   <> "\n\n## 上轮回灌 (last_result)\n" <> renderLastResult lr
                   <> "\n\n## 你的任务\n" <> integrationTask
         msgs = [ SystemMsg (fromMaybe integrationSystemPrompt (poIntegrationSystem overrides))
-               , UserMsg userPrompt ]
+              , UserMsg userPrompt ]
 
-    -- 机械限制: 本次 integration 只采纳第一个 writeSlot
+    -- 机械限制: 本次 integration 最多写 3 个槽 (高密度 probe 的多槽事实不浪费)
     writeSlotCounter <- newIORef (0 :: Int)
-    let wrappedHandler name args =
+    let maxSlotsPerProbe = 3
+        wrappedHandler name args =
             if name == "writeSlot"
                 then do
                     n <- atomicModifyIORef' writeSlotCounter (\c -> (c + 1, c))
-                    if n == 0
+                    if n < maxSlotsPerProbe
                         then dispatchTool oracle name args
-                        else pure "rejected: 本次 integration 已经写过 1 个槽, 后续 writeSlot 不生效 (一发 probe 只升 1 个槽)"
+                        else pure "rejected: 本次 integration 已写 3 个槽, 后续 writeSlot 不生效"
                 else dispatchTool oracle name args
 
     _ <- runChat apiKey model [writeSlotTool]
@@ -395,7 +414,31 @@ integrationPhase oracle apiKey model trace roundN lastAction lr overrides = do
 -- ---------------------------------------------------------------
 
 gatePhase :: Oracle -> Text -> Text -> TraceHandle -> Int -> PromptOverrides -> IO Bool
-gatePhase oracle apiKey model trace _roundN overrides = do
+gatePhase oracle apiKey model trace _roundN overrides =
+    case poGateSystem overrides of
+        Just _  -> gatePhaseLLM oracle apiKey model trace overrides
+        Nothing -> gateHeuristic oracle trace
+
+
+gateHeuristic :: Oracle -> TraceHandle -> IO Bool
+gateHeuristic oracle trace = do
+    confs <- slotConfidences oracle
+    nProbes <- countProbes oracle
+    let mean = sum (map snd confs) / fromIntegral (length confs)
+        continue = mean < 0.8
+    appendEvent trace "gate_heuristic" (A.object
+        [ "mean" A..= mean
+        , "confs" A..= confs
+        , "n_probes" A..= nProbes
+        , "continue" A..= continue
+        ])
+    putStrLn $ "[gate] heuristic: mean=" ++ show (round (mean * 100) :: Int)
+            ++ "% -> " ++ (if continue then "continue" else "converge")
+    pure continue
+
+
+gatePhaseLLM :: Oracle -> Text -> Text -> TraceHandle -> PromptOverrides -> IO Bool
+gatePhaseLLM oracle apiKey model trace overrides = do
     summaryTxt <- summary oracle
     nProbes <- countProbes oracle
     let probeStats = "\n## 探针计数\n本任务已发 probe 数: " <> T.pack (show nProbes)
@@ -634,8 +677,9 @@ integrationSystemPrompt = T.unlines
     , "上一发探索刚执行完, 看 last_result 揭示了什么, 决定要不要 writeSlot。"
     , ""
     , "**重要约束**："
-    , "  - 一发 probe 只能升 **1 个槽**——选 last_result 最直接揭示的那个写"
-    , "  - 即便给多个 writeSlot tool call, harness 只采纳第一个, 后续静默丢弃"
+   , "  - 一发 probe 只能升 **1 个槽**——选 last_result 最直接揭示的那个写"
+    , "  - 一发 probe 最多升 **3 个槽**——高密度 probe (如 --help) 可同时落多个槽"
+    , "  - 即便给多个 writeSlot tool call, harness 最多采纳 3 个, 后续静默丢弃"
     , ""
     , "可用 tool："
     , "  - writeSlot(slot_id, title, content, confidence, evidence, [notes], [index])"

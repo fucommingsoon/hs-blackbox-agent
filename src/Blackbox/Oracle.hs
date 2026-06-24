@@ -19,8 +19,10 @@ module Blackbox.Oracle
     , readNextRoundHints  -- decision 渲染 user prompt 时读上一发 integration 留的 hint
     , loadOracle          -- for belief synthesis
     , lastProbeRecord     -- for step mode resume
-    , uniqueProbeCommands -- 去重的历史 probe cmd 列表
-    , referenceProbes     -- 常驻参考文档 (--help / --version 类)
+   , uniqueProbeCommands -- 去重的历史 probe cmd 列表
+    , probeHistorySummary  -- 最近 N 发 probe 的浓缩视图 (round/cmd/exit/stdout 切片/stderr 切片)
+    , slotConfidences     -- 7 universal 槽 confidence 列表 (供 gate 启发式)
+   , referenceProbes     -- 常驻参考文档 (--help / --version 类)
       -- LLM-facing tool dispatcher
     , dispatchTool
       -- direct ops used by Init
@@ -482,15 +484,61 @@ uniqueProbeCommands o = do
             cmds = [ c
                    | line <- ls
                    , Right (A.Object obj) <- [A.eitherDecodeStrict (TE.encodeUtf8 line)]
-                   , Just (A.String c) <- [KM.lookup "cmd" obj]
-                   ]
+                  , Just (A.String c) <- [KM.lookup "cmd" obj]
+                  ]
         pure (dedupKeepOrder cmds)
-  where
+ where
     dedupKeepOrder = goD []
     goD seen [] = reverse seen
     goD seen (x : xs)
         | x `elem` seen = goD seen xs
         | otherwise     = goD (x : seen) xs
+
+
+-- 返回最近 N 条 probe 的浓缩视图 (round, cmd, exit, stdout 前 80 字符, stderr 前 80 字符, stdout_bytes, stderr_bytes)
+-- 用于 decision prompt, 让 LLM 有探索记忆。只保留最后 maxHistoryEntries 条。
+probeHistorySummary :: Oracle -> IO [(Int, Text, Int, Text, Text, Int, Int)]
+probeHistorySummary o = do
+    ex <- doesFileExist (probesPath o)
+    if not ex then pure []
+    else do
+        contents <- TIO.readFile (probesPath o)
+        let ls = filter (not . T.null) (T.lines contents)
+            entries = [ (rnd, cmd_, exit_, soSlice, seSlice, soBytes, seBytes)
+                      | line <- ls
+                      , Right (A.Object obj) <- [A.eitherDecodeStrict (TE.encodeUtf8 line)]
+                      , Just (A.Number rn)   <- [KM.lookup "round" obj]
+                      , let rnd = truncate rn :: Int
+                      , Just (A.String cmd_) <- [KM.lookup "cmd" obj]
+                      , Just (A.Number en)   <- [KM.lookup "exit" obj]
+                      , let exit_ = truncate en :: Int
+                      , Just (A.String so)   <- [KM.lookup "stdout" obj]
+                      , Just (A.String se)   <- [KM.lookup "stderr" obj]
+                      , let soBytes = T.length so
+                      , let seBytes = T.length se
+                      , let soSlice = T.take 80 so
+                      , let seSlice = T.take 80 se
+                      ]
+        pure (takeLast maxHistoryEntries entries)
+  where
+    maxHistoryEntries = 20
+    takeLast n xs = drop (max 0 (length xs - n)) xs
+
+
+-- 返回 7 universal 槽的 (slot_id, confidence) 列表, 供 gate 启发式算均值。
+slotConfidences :: Oracle -> IO [(Text, Double)]
+slotConfidences o = do
+    val <- readIORef (oracleState o)
+    pure [ (sid, extractConf val sid) | sid <- universalSlots ]
+  where
+    extractConf (A.Object root) sid =
+        case KM.lookup "slots" root of
+            Just (A.Object slotsMap) ->
+                case KM.lookup (Key.fromText sid) slotsMap of
+                    Just (A.Object so) -> numberField so "confidence" 0
+                    _                  -> 0
+            _ -> 0
+    extractConf _ _ = 0
 
 
 -- ---------------------------------------------------------------

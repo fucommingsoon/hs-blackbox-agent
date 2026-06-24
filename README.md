@@ -4,10 +4,10 @@ Haskell-native 黑盒探测 agent。对一个 PB task 目录里的 `./probe` 反
 
 ## 五个 LLM 调用阶段
 
-1. **init** — 读目录里 docs（README/SPEC/man），机械执行 `ls -la` / `file ./probe` / `./probe --help`，调一次 Deepseek 把文档推断 + --help 实测落进 `oracle.yaml` 的 7+other 槽位，confidence 全 = 0
-2. **决策** — 每轮：harness 把 oracle 摘要 + 本轮动态 + 参考文档 + 探针计数 + 去重历史 cmd + last_result + hints 塞进 prompt，Deepseek 出一个 action（probe / grep / other）
-3. **整理** — 探索执行完，harness 把 action + 结果回灌，Deepseek 用 writeSlot 把新事实落槽（一发只升 1 槽，提升 confidence / 替换内容）
-4. **Gate** — 每轮整理后，独立的 LLM 节点只判「信息够不够收敛」
+1. **init** — 读目录里 docs（README/SPEC/man），机械执行 `ls -la` / `./probe --help`，调一次 Deepseek 把文档推断 + --help 实测落进 `oracle.yaml` 的 7+other 槽位，confidence 全 = 0
+2. **决策** — 每轮：harness 把 oracle 摘要 + 本轮动态 + 参考文档 + 探针计数 + 探索历史(含结果浓缩) + last_result + hints 塞进 prompt，Deepseek 出一个 action（probe / grep / other）
+3. **整理** — 探索执行完，harness 把 action + 结果回灌，Deepseek 用 writeSlot 把新事实落槽（一发最多升 3 槽，提升 confidence / 替换内容）
+4. **Gate** — 每轮整理后，默认 harness 启发式（7 槽均值 >= 0.8 收敛）；若 `--prompts-dir` 提供了 gate.txt 则走 LLM
 5. **belief 合成** — 收敛后，harness 把 oracle.yaml 全文喂 LLM，自由发挥写 belief.md
 
 收敛条件：wall-clock 20 min 到 **或** Gate 返回 `continue: false`。决策阶段不出 stop（收到会被 harness 忽略并 warn）。
@@ -58,7 +58,9 @@ $HSBB step-snap <root-dir>  # 快照模式: root 下 step_N/ 子目录, 每次cp
 
 - **docker exec 重写**：探测 task 的 `./probe` 若是 docker wrapper，harness 自动把 cmd 重写为 `docker exec -i <container> timeout 5 bash -c '<binary> <args>'`，host 侧再包 30s 兜底
 - **confidence 衰减**（LLM 看不到）：`obtained = min(LLM值, 0.2)`，`delta = obtained * (1 - current)`，逐步收敛
-- **一发只升一槽**：integration 阶段 harness 硬拦，第 2 个及以后的 writeSlot 不生效
+- **一发最多升 3 槽**：integration 阶段 harness 硬拦，第 4 个及以后的 writeSlot 不生效（高密度 probe 如 --help 可同时落多个槽）
+- **探索历史浓缩视图**：decision prompt 带最近 20 发 probe 的浓缩视图（round/cmd/exit/stdout 80 字符/stderr 80 字符），让 LLM 有探索记忆
+- **Gate 默认启发式**：harness 端算 7 槽均值，>= 0.8 收敛，省每轮 1 次 API 调用；`--prompts-dir` 提供 gate.txt 时回退 LLM 路径
 - **反重复拦截**：decision 输出的 cmd 若与历史 verbatim 重复且 why 未声明「重复 probe_」，harness 拒绝并 retry 一次
 - **inconclusive 标记**：LLM 可诚实标记「探了但没结果」，confidence 不动，>=2 后摘要标 `[INCONCLUSIVE ×N]`
 - **hint_for_next_round**：integration 可把 actionable 信号传给下一发 decision，通过 oracle.yaml 跨进程持久

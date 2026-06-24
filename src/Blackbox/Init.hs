@@ -39,11 +39,10 @@ runInit oracle apiKey model taskDir trace overrides = do
         , "docs_total_chars" A..= sum (map (T.length . snd) docs)
         ])
 
-    -- 1) fs context probes — 看 task 目录 / binary 类型 / 环境
-    --    (跑在 host shell, 不进 docker container; rewriteForDocker 会自动 skip)
-    putStrLn "[init] running fs context probes: ls -la, file ./probe"
+   -- 1) fs context probes — 看 task 目录 / binary 类型 / 环境
+   --    (跑在 host shell, 不进 docker container; rewriteForDocker 会自动 skip)
+    putStrLn "[init] running fs context probe: ls -la"
     fsLs   <- runShellInDir taskDir "ls -la ."
-    fsFile <- runShellInDir taskDir "file ./probe"
 
     -- 2) 一发 --help 当 canonical 自我介绍 (跨 task 几乎都支持; 去掉之前 -h/-?/-V/-v/--version 5 个重复 alias)
     putStrLn "[init] running mechanical --help"
@@ -62,17 +61,13 @@ runInit oracle apiKey model taskDir trace overrides = do
     case fsLs of
         Just po -> recordInitProbe "probe_init_fs_ls" po
         Nothing -> pure ()
-    case fsFile of
-        Just po -> recordInitProbe "probe_init_fs_file" po
-        Nothing -> pure ()
     case helpOutcome of
         Just po -> recordInitProbe "probe_init_help" po
         Nothing -> pure ()
 
     let fsContext = renderInitProbes
-            [ ("ls -la .", fsLs)
-            , ("file ./probe", fsFile)
-            ]
+           [ ("ls -la .", fsLs)
+           ]
         preProbesSection = renderInitProbes [ ("./probe --help", helpOutcome) ]
         sysPrompt = fromMaybe initSystemPrompt (poInitSystem overrides)
         userPrompt = "## 任务文档\n" <> docsBlob

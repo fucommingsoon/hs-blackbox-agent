@@ -49,13 +49,14 @@ API 统一参数：model = deepseek-chat，temperature = 0.3，max_tokens = 2000
 | 阶段 | 触发 | 暴露 tool | maxRounds | 输入 | 输出 |
 |---|---|---|---|---|---|
 | ① init | hsbb init / full 启动 | writeSlot | 6 | docs + fs 上下文 (ls -la / file ./probe) + --help 实测 | writeSlot × N，confidence 全 = 0 |
-| ② decision | 每轮非收敛时 | 无 | 2 | oracle 摘要 + 本轮动态 + 参考文档 + 探针计数 + 去重历史 cmd + last_result + hints | action JSON: probe / grep / other（无 stop） |
+| ② decision | 每轮非收敛时 | 无 | 2 | oracle 摘要 + 本轮动态 + 参考文档 + 探针计数 + 探索历史(含结果浓缩) + last_result + hints | action JSON: probe / grep / other（无 stop） |
 | ② decision retry | 反重复拦截触发 | 无 | 2 | 原 msgs + harness feedback | action JSON |
-| ③ integration | 每轮探索后 | writeSlot（仅第 1 个生效） | 4 | oracle 摘要 + 上轮 action + last_result | writeSlot × 0..1 |
-| ④ gate | 每轮整理后 | 无 | 2 | oracle 摘要 + 探针计数 | {"continue": true/false, "why": "..."} |
+| ③ integration | 每轮探索后 | writeSlot（最多 3 个生效） | 4 | oracle 摘要 + 上轮 action + last_result | writeSlot × 0..3 |
+| ④ gate (默认) | 每轮整理后 | 无 | — | 7 槽均值 (harness 端计算) | continue/converge |
+| ④ gate (LLM) | --prompts-dir 提供 gate.txt | 无 | 2 | oracle 摘要 + 探针计数 | {"continue": true/false, "why": "..."} |
 | ⑤ belief | 收敛触发后一次 | 无 | 2 | oracle.yaml 全文 | belief.md markdown |
 
-收敛触发：harness 端 wall-clock 20 min / LLM 端 Gate 返回 continue: false。decision 出 stop 会被 harness 忽略并 warn，不触发收敛。
+收敛触发：harness 端 wall-clock 20 min / Gate 判收敛（默认 harness 启发式 7 槽均值 >= 0.8，或 LLM 返回 continue: false）。decision 出 stop 会被 harness 忽略并 warn，不触发收敛。
 
 ## ① oracle.yaml schema
 
@@ -143,7 +144,6 @@ init 阶段的机械 probe（round = 0）：
 | id | cmd | round |
 |---|---|---|
 | probe_init_fs_ls | ls -la . | 0 |
-| probe_init_fs_file | file ./probe | 0 |
 | probe_init_help | ./probe --help | 0 |
 
 decision 阶段的 probe（round >= 1）：id 格式 probe_NNN（3 位零填充）。
