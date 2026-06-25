@@ -309,6 +309,20 @@ decisionPhase oracle apiKey model trace roundN lastResult overrides = do
     let firstAction = parseActionFromText (crContent result)
     -- 硬拦: 若 LLM 出 verbatim 已执行 cmd 且 why 没声明「重复 probe_xxx」, retry 一次喂 feedback.
     case firstAction of
+        -- 拦截: cmd 里不含 ./probe (LLM 写错二进制名, 如 ./propr / ./prob)
+        Just (ActProbe cmd why)
+            | not ("./probe" `T.isInfixOf` cmd) -> do
+                putStrLn $ "[decision] WARN: cmd missing ./probe: " ++ T.unpack cmd
+                appendEvent trace "decision_no_probe_rejected" (A.object
+                    [ "cmd"        A..= cmd
+                    , "why"        A..= why
+                    ])
+                let feedback = "harness 拒绝: cmd 里没有 `./probe`。二进制名是 `./probe` (不是 propr/prob/entr 等), 修正后重发。"
+                    retryMsgs = msgs ++ [ AssistantMsg (Just (crContent result)) []
+                                        , UserMsg feedback ]
+                retry <- runChat apiKey model [] retryMsgs
+                            (dispatchTool oracle) (appendEvent trace) 2
+                pure (parseActionFromText (crContent retry))
         Just (ActProbe cmd why)
             | cmd `elem` pastCmds && not (isExplicitRepeat why) -> do
                 putStrLn $ "[decision] WARN: LLM emitted duplicate cmd: " ++ T.unpack cmd
