@@ -292,10 +292,22 @@ dynamicSection o currentRoundN = do
                     else if attempts == 1
                          then [ "- 上轮 writeSlot 尝试: 1 次, 生效" ]
                          else [ "- 上轮 writeSlot 尝试: 0 次 (上轮整理未发 writeSlot)" ]
+                -- 探索集中度 steering: 有槽被写 2+ 次且最近一轮仍在写, 同时存在未触槽
+                -- → 提醒 LLM 转向未触维度, 避免在一个槽上 tunnel vision
+                focusRender =
+                    let hotSlots = [ (sid, wc) | (sid, wc, lr, _d, _lpc, _conf) <- slotInfo
+                                    , wc >= 2, lr == lastRoundUpdate ]
+                    in if not (null hotSlots) && not (null untouched)
+                       then [ "- 探索集中度: " <> T.intercalate ", "
+                              [ sid <> " x" <> T.pack (show wc) | (sid, wc) <- hotSlots ]
+                              <> " (最近一轮仍在写), 其他 " <> T.pack (show (length untouched))
+                              <> " 槽仍 conf=0 — 建议转向未触维度" ]
+                       else []
                 lines_ =
                     [ "## 本轮动态" ]
                     ++ upgradeRender
                     ++ attemptRender
+                    ++ focusRender
                     ++ (case untouched of
                           [] -> [ "- 未触槽: (无)" ]
                           xs -> [ "- 未触槽: " <> T.intercalate ", " xs ])
@@ -305,7 +317,7 @@ dynamicSection o currentRoundN = do
             in pure (T.unlines lines_)
         _ -> pure "## 本轮动态\n(empty)\n"
   where
-    extractInfo sid slotsMap =
+   extractInfo sid slotsMap =
         case KM.lookup (Key.fromText sid) slotsMap of
             Just (A.Object so) ->
                 let wc  = case KM.lookup "write_count" so of
