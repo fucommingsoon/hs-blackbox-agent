@@ -98,7 +98,7 @@ writeSlotTool = A.object
                 , "content"    A..= A.object [ "type" A..= ("string" :: Text)
                                              , "description" A..= ("High-density factual statements as bullet list. Each line = one probe-observed fact or precise behavior, ideally with ← probe_id evidence. NO prose narration, NO doc paraphrase. Good: 'exit 2 on --foo (unknown flag) ← probe_007' / 'stdout: HTTP body / stderr: progress' / '-print=H/B/h/b/A: H=resp header, B=body, h=req header...'. Bad (forbidden): 'This tool is a Go-based CLI...' (narrative) / 'Generally produces output to stdout' (vague) / 'Supports authentication' (doc paraphrase, not observation)" :: Text) ]
                 , "confidence" A..= A.object [ "type" A..= ("number" :: Text)
-                                             , "description" A..= ("0.0 to 1.0" :: Text) ]
+                                            , "description" A..= ("0.0 to 1.0 — information increment from this probe, NOT certainty. 0=no new info, 0.3+=significant new behavior discovered" :: Text) ]
                 , "evidence"   A..= A.object [ "type" A..= ("array" :: Text)
                                              , "items" A..= A.object [ "type" A..= ("string" :: Text) ]
                                              , "description" A..= ("probe ids supporting this" :: Text) ]
