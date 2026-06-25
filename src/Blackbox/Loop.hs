@@ -38,6 +38,7 @@ import           Blackbox.Deepseek       (Message (..), runChat,
                                           writeSlotTool,
                                           lookupProbeTool, ChatResult (..))
 import           Blackbox.Oracle         (Oracle, summary, dynamicSection,
+                                          fullSummary,
                                           appendProbe, countProbes,
                                           countDecisionProbes,
                                           dispatchTool, lastProbeRecord,
@@ -379,7 +380,7 @@ integrationPhase oracle apiKey model trace roundN lastAction lr overrides = do
     setCurrentRound oracle roundN
     -- 清空上发 integration 给本发的 hint (本发 integration 会重新累加给下一发)
     resetNextRoundHints oracle
-    summaryTxt <- summary oracle
+    summaryTxt <- fullSummary oracle
     let actJson = actionJson lastAction
         userPrompt = summaryTxt <> "\n\n## 上轮 action\n" <> actJson
                   <> "\n\n## 上轮回灌 (last_result)\n" <> renderLastResult lr
@@ -425,7 +426,7 @@ gateHeuristic oracle trace = do
     confs <- slotConfidences oracle
     nProbes <- countProbes oracle
     let mean = sum (map snd confs) / fromIntegral (length confs)
-        continue = mean < 0.8
+        continue = mean < 0.6
     appendEvent trace "gate_heuristic" (A.object
         [ "mean" A..= mean
         , "confs" A..= confs
@@ -686,6 +687,7 @@ integrationSystemPrompt = T.unlines
     , "      slot_id: identity / cli_flags / io_channels / exit_codes / error_buckets"
     , "               / impl_fingerprint / known_unknowns（universal） 或自定义 id（落 other）"
     , "      evidence 必填: 至少含本轮 probe_id"
+    , "      evidence 必须保留已有条目 + 追加本轮新 probe_id (不要丢弃旧 evidence)"
     , ""
     , "**title is critical**: must be one info-dense sentence with concrete name/version/counts/key flags/quirks."
     , "  Good: 'yj 5.1.0 (Go binary, std flag parser, 4-format converter)' / '20 single-letter flags, -x[x] 4x4 conversion matrix'"
@@ -706,7 +708,11 @@ integrationSystemPrompt = T.unlines
     , "    - 'Supports authentication and proxy' (doc paraphrase, not observation)"
     , "    - '13 flags' (count alone, no flag specifics)"
     , ""
-    , "oracle 摘要已在 user prompt 给你（title + confidence）。决策阶段的 action.why 字段会指明本发的假设 + 目标槽。"
+    , "oracle 全量信息已在 user prompt 给你（完整 title + content + confidence + evidence）。"
+    , "决策阶段的 action.why 字段会指明本发的假设 + 目标槽。"
+    , ""
+    , "**merge 原则**: 回写 writeSlot 时必须 merge——保留已有 content 中的 bullet + 追加/修正新发现。"
+    , "不要全量覆盖丢失旧事实。evidence 同理: 保留旧条目 + 追加新 probe_id。"
     , ""
     , "**自由判定 last_result 真实呈现的状态**, 按下面分类落 writeSlot:"
     , "  - 验证型: last_result 确认 why 假设 (init 推断被实测吻合)"
@@ -741,10 +747,12 @@ integrationSystemPrompt = T.unlines
 integrationTask :: Text
 integrationTask = T.unlines
     [ "看 action.why 中声明的「目标槽 + 预期」, 比对 last_result:"
-    , "  - 符合假设 (验证型) → writeSlot 同槽位, 提升 confidence (evidence 含本轮 probe_id)"
+    , "  - 符合假设 (验证型) → writeSlot 同槽位, 提升 confidence (evidence 保留旧条目 + 追加本轮 probe_id)"
     , "  - 揭示新事实 → writeSlot 落槽 (新事实写入 title/content)"
     , "  - 反驳现有槽 (冲突型) → writeSlot 修正"
     , "  - 跟 why 声明完全无关 → 不发 tool call, 一句话总结"
     , ""
     , "**默认是验证型** (大部分 probe 是验证文档推断), 不要把验证误判为「无新意」。"
+    , ""
+    , "**回写 merge**: 保留已有 content bullet + 追加新发现; 不要全量覆盖。"
     ]

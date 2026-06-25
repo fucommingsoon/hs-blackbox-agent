@@ -9,7 +9,8 @@ module Blackbox.Oracle
       Oracle
     , initOracle
     , summary
-    , dynamicSection      -- 本轮动态 / 未触槽 / 累计次数
+    , fullSummary        -- 全量 content 渲染 (integration 用, 不截断)
+   , dynamicSection      -- 本轮动态 / 未触槽 / 累计次数
     , appendProbe
     , countProbes
     , countDecisionProbes -- 只算 round>0 的 probe (init 阶段机械 probe round=0)
@@ -169,18 +170,25 @@ countLinesIfExists p = do
 summary :: Oracle -> IO Text
 summary o = do
     val <- readIORef (oracleState o)
-    pure (renderSummary val)
+    pure (renderSummary 1200 val)
+
+-- 全量渲染: 不截断 content, 供 integration phase 使用。
+-- LLM 需看到完整 content 才能 merge 新旧事实, 不丢失已有 bullet。
+fullSummary :: Oracle -> IO Text
+fullSummary o = do
+    val <- readIORef (oracleState o)
+    pure (renderSummary maxBound val)
 
 
-renderSummary :: A.Value -> Text
-renderSummary (A.Object root) =
+renderSummary :: Int -> A.Value -> Text
+renderSummary maxChars (A.Object root) =
     let slots = case KM.lookup "slots" root of
                     Just (A.Object s) -> s
                     _                 -> KM.empty
         other = case KM.lookup "other" root of
                     Just (A.Array a) -> V.toList a
                     _                -> []
-        slotLines = concatMap (slotLine slots) universalSlots
+        slotLines = concatMap (slotLine maxChars slots) universalSlots
         otherLines = if null other then []
                      else "- other:" : map otherLine other
     in T.unlines $
@@ -189,11 +197,11 @@ renderSummary (A.Object root) =
         ]
         ++ slotLines
         ++ otherLines
-renderSummary _ = "## oracle 摘要\n(空)\n"
+renderSummary _ _ = "## oracle 摘要\n(空)\n"
 
 
-slotLine :: KM.KeyMap A.Value -> Text -> [Text]
-slotLine slots sid =
+slotLine :: Int -> KM.KeyMap A.Value -> Text -> [Text]
+slotLine maxChars slots sid =
     let padded = T.justifyLeft 18 ' ' sid
     in case KM.lookup (Key.fromText sid) slots of
         Just (A.Object so) ->
@@ -205,12 +213,12 @@ slotLine slots sid =
                            then "[INCONCLUSIVE ×" <> T.pack (show inconN) <> "]"
                            else "[" <> formatConf conf <> "]"
                 header   = "- " <> padded <> " " <> tag <> "  " <> title
-                -- content 也渲染给 decision LLM (init 的文档推断 + integration 的实测 fact)
-                -- 缩进对齐 + 截断 1200 字符避免单 slot 占满 prompt
+                -- content 也渲染给 LLM (init 推断 + integration 实测 fact)
+                -- maxChars=1200 给 decision (省 prompt); maxBound 给 integration (全量 merge)
                 contentLines =
                     if T.null (T.strip content_)
                         then []
-                        else map ("    " <>) (T.lines (T.take 1200 content_))
+                        else map ("    " <>) (T.lines (T.take maxChars content_))
             in header : contentLines
         _ -> [ "- " <> padded <> " [EMPTY]  (未填)" ]
 
@@ -598,7 +606,7 @@ writeSlotTool _ _ = pure "error: bad args"
 -- Raw writeSlot — used both by tool dispatcher and Init phase.
 --
 -- Confidence 应用衰减公式 (LLM 不知道):
---   obtained = min(LLM 给的值, 0.2)
+--   obtained = min(LLM 给的值, 0.3)
 --   delta    = obtained * (1 - current)
 --   new      = current + delta
 -- 这样 LLM 即便每次都给 1.0, 实际累加也是逐步收敛的。
@@ -693,7 +701,7 @@ getCurrentInconclusiveCount _ _ _ = 0
 -- 衰减公式：每次 probe 单次上升受 0.2 上限 + (1-current) 衰减。
 applyConfidenceDecay :: Double -> Double -> Double
 applyConfidenceDecay current llmValue =
-    let obtained = min 0.2 llmValue
+    let obtained = min 0.3 llmValue
         delta    = obtained * (1 - current)
     in current + delta
 
