@@ -45,8 +45,10 @@ runInit oracle apiKey model taskDir trace overrides = do
     fsLs   <- runShellInDir taskDir "ls -la ."
 
     -- 2) 一发 --help 当 canonical 自我介绍 (跨 task 几乎都支持; 去掉之前 -h/-?/-V/-v/--version 5 个重复 alias)
-    putStrLn "[init] running mechanical --help"
-    helpOutcome <- runShellInDir taskDir "./probe --help"
+    -- 2) 找到 canonical help: 依次试 --help / -h，取第一个有有效 help 内容的。
+    --    有些工具 (如 entr) 不认 --help，只认 -h。
+    putStrLn "[init] running mechanical help probes (--help, -h)"
+    helpOutcome <- findValidHelp taskDir
 
     let recordInitProbe pid po = do
             appendProbe oracle (probeToJson pid 0 po)
@@ -62,17 +64,21 @@ runInit oracle apiKey model taskDir trace overrides = do
         Just po -> recordInitProbe "probe_init_fs_ls" po
         Nothing -> pure ()
     case helpOutcome of
-        Just po -> recordInitProbe "probe_init_help" po
+        Just (pid, po) -> do
+            recordInitProbe pid po
+            putStrLn $ "[init] canonical help: " ++ T.unpack pid
         Nothing -> pure ()
 
     let fsContext = renderInitProbes
            [ ("ls -la .", fsLs)
            ]
-        preProbesSection = renderInitProbes [ ("./probe --help", helpOutcome) ]
+        preProbesSection = case helpOutcome of
+            Just (pid, po) -> renderInitProbes [ (pid, Just po) ]
+            Nothing        -> ""
         sysPrompt = fromMaybe initSystemPrompt (poInitSystem overrides)
         userPrompt = "## 任务文档\n" <> docsBlob
                   <> "\n\n## fs 上下文 (init 阶段看到的环境)\n" <> fsContext
-                  <> "\n\n## 实测自我介绍 (init 阶段已机械执行 --help)\n" <> preProbesSection
+                  <> "\n\n## 实测自我介绍 (init 阶段已机械执行 help probe)\n" <> preProbesSection
                   <> "\n\n## 你的任务\n" <> initUserPrompt
         msgs = [ SystemMsg sysPrompt, UserMsg userPrompt ]
 
@@ -106,6 +112,44 @@ renderInitProbes labelOutcomes = T.unlines $ catMaybes (map render1 labelOutcome
         , T.take 4000 (poStderr po)
         , "```"
         ]
+
+
+-- 依次试 ./probe --help / ./probe -h，取第一个 stdout+stderr 有有效 help 内容的。
+-- 返回 (probe_id, outcome)，probe_id 为 "probe_init_help" 或 "probe_init_h"。
+-- 全部无效时返回 Nothing。
+findValidHelp :: FilePath -> IO (Maybe (Text, ProbeOutcome))
+findValidHelp taskDir = go candidates
+  where
+    candidates =
+        [ ("probe_init_help", "./probe --help")
+        , ("probe_init_h",    "./probe -h")
+        ]
+    go [] = pure Nothing
+    go ((pid, cmd) : rest) = do
+        mPo <- runShellInDir taskDir (T.pack cmd)
+        case mPo of
+            Just po | isHelpContent po ->
+                pure (Just (pid, po))
+            _ -> go rest
+
+    -- 判定是否真正有效的 help 输出:
+    --   1. stderr 含 "invalid option" / "unrecognized" / "unknown" → 明确拒绝, 不是 help
+    --   2. stdout+stderr 合并后含 help 关键词 (usage:/options:/flags: 等)
+    --   3. 且 stdout 非空 (真正的 help 通常把内容打到 stdout, 即使是 BSD 风格)
+    --      例外: Go std flag 的 --help 把 usage 打到 stderr, 但不含 "invalid option"
+    isHelpContent po =
+        let combined = poStdout po <> "\n" <> poStderr po
+            lower    = T.toLower combined
+            isRejected = any (`T.isInfixOf` lower)
+                [ "invalid option", "unrecognized", "unknown option", "illegal option" ]
+            hasKeyword = any (`T.isInfixOf` lower)
+                [ "usage:", "usage of", "options:", "flags:"
+                , "arguments:", "command:", "summary:", "synopsis:"
+                , "commands:", "subcommands:", "examples:"
+                ]
+            hasFlagLine = any (`T.isInfixOf` combined) ["\n  -", "\n    -", "\n\t-"]
+            hasStdout = not (T.null (T.strip (poStdout po)))
+        in not isRejected && (hasKeyword || hasFlagLine) && hasStdout
 
 
 initSystemPrompt :: Text
