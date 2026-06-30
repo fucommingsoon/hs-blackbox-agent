@@ -1,0 +1,1 @@
+2026/04/17 07:34:08.807976 bat.go:215: can't get the url Get "http://ht!tp://invalid": dial tcp: lookup ht!tp: no such host

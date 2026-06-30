@@ -1,0 +1,11 @@
+[95mPOST[0m [96m/echo[0m [95mHTTP/1.1[0m
+[90mHost[0m:[96m localhost:8899[0m
+[90mAccept[0m:[96m application/json[0m
+[90mAccept-Encoding[0m:[96m gzip, deflate[0m
+[90mContent-Type[0m:[96m application/json[0m
+[90mUser-Agent[0m:[96m bat/0.1.0[0m
+
+
+{"name":"Alice"}
+
+

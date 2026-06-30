@@ -1,0 +1,18 @@
+
+{"name":"Alice"}
+
+
+
+{
+  "[95mmethod[0m": "[96mPOST[0m",
+  "[95murl[0m": "[96m/echo[0m",
+  "[95mheaders[0m": {
+    "[95mHost[0m": "[96mlocalhost:8899[0m",
+    "[95mUser-Agent[0m": "[96mbat/0.1.0[0m",
+    "[95mContent-Length[0m": "[96m17[0m",
+    "[95mAccept[0m": "[96mapplication/json[0m",
+    "[95mAccept-Encoding[0m": "[96mgzip, deflate[0m",
+    "[95mContent-Type[0m": "[96mapplication/json[0m"
+  }[0m,
+  "[95mdata[0m": "[96m{\"name\":\"Alice\"}\n[0m"
+}

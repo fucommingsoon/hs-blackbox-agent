@@ -1,0 +1,2 @@
+executable: unable to stat '/tmp/test_mix/nonexistent.txt'
+mixed_test

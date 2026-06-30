@@ -1,0 +1,14 @@
+summary:
+    -a  Do not consolidate events
+    -c  Clear screen before execution
+    -d  Track files added or removed from directories
+    -n  Non-interactive mode
+    -p  Wait for first event
+    -r  Run as a background process, use signal to restart
+    -s  Evaluate using a shell
+    -x  Format exit status
+    -z  Exit after the utility completes
+docs:
+    man entr
+release: 5.7
+usage: entr [-acdnprsxz] utility [argument [/_] ...] < filenames

@@ -1,0 +1,14 @@
+
+{
+  "method": "POST",
+  "url": "/post",
+  "headers": {
+    "Host": "localhost:8899",
+    "User-Agent": "bat/0.1.0",
+    "Content-Length": "34",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate",
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "data": "name=test&email=test%40example.com"
+}

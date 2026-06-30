@@ -1,0 +1,6 @@
+
+{
+  "method": "POST",
+  "path": "/post",
+  "body": "raw body content"
+}

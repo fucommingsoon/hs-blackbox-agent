@@ -1,0 +1,11 @@
+
+{
+  "method": "GET",
+  "url": "/api?formula=a%3Db",
+  "headers": {
+    "Host": "localhost:8899",
+    "User-Agent": "bat/0.1.0",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate"
+  }
+}

@@ -1,0 +1,14 @@
+
+{
+  "method": "PATCH",
+  "url": "/patch",
+  "headers": {
+    "Host": "localhost:8899",
+    "User-Agent": "bat/0.1.0",
+    "Content-Length": "18",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate",
+    "Content-Type": "application/json"
+  },
+  "data": "{\"field\":\"value\"}\n"
+}

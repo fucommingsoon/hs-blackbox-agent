@@ -1,0 +1,3 @@
+executable: unable to stat '/nonexistent1.txt'
+executable: unable to stat '/nonexistent2.txt'
+executable: No regular files to watch

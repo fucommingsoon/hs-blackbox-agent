@@ -1,0 +1,15 @@
+
+{
+  "[95mkey[0m": "[96mvalue with \"quotes\"[0m",
+  "[95mnumber[0m": [96m123.45[0m,
+  "[95mbool[0m": [96mtrue[0m,
+  "[95mnull[0m": [96mnull[0m,
+  "[95municode[0m": "[96m\u65e5\u672c\u8a9e[0m",
+  "[95marray[0m": [
+    [96m1[0m,
+    "[95mtwo[0m",
+    {
+      "[95mnested[0m": "[96mvalue[0m"
+    }
+  ]
+}

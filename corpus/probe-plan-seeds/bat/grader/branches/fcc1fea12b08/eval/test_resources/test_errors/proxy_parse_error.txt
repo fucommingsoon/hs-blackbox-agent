@@ -1,0 +1,1 @@
+2026/04/17 07:37:42.874785 bat.go:182: Proxy Url parse errparse "ht!tp://invalid": first path segment in URL cannot contain colon

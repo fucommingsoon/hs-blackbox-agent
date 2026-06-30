@@ -1,0 +1,19 @@
+[95mHTTP/1.0[0m [92m200 OK[0m
+[90mServer[0m: [96mBaseHTTP/0.6 Python/3.10.12[0m
+[90mDate[0m: [96mFri, 17 Apr 2026 08:07:18 GMT[0m
+[90mContent-Type[0m: [96mapplication/json[0m
+
+
+{
+  "[95mstatus[0m": "[96mok[0m",
+  "[95mdata[0m": {
+    "[95mnested[0m": {
+      "[95mvalue[0m": [96m123
+    }
+  }[0m,
+  "[95mlist[0m": [
+    [96m1[0m,
+    [95m2[0m,
+    [95m3
+  ]
+}

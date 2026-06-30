@@ -1,0 +1,1 @@
+2026/04/17 07:36:09.836163 bat.go:215: can't get the url Get "http://this-domain-does-not-exist-23947291.invalid": dial tcp: lookup this-domain-does-not-exist-23947291.invalid on 10.0.0.2:53: no such host

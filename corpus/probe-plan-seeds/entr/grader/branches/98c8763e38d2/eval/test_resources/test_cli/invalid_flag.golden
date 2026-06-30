@@ -1,0 +1,4 @@
+./executable: invalid option -- 'q'
+release: 5.7
+usage: entr [-acdnprsxz] utility [argument [/_] ...] < filenames
+hint: use -h to display option summary

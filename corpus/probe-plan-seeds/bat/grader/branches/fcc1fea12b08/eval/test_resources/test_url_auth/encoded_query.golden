@@ -1,0 +1,11 @@
+
+{
+  "method": "GET",
+  "url": "/search?q=hello+world&type=text%2Fhtml",
+  "headers": {
+    "Host": "localhost:8899",
+    "User-Agent": "bat/0.1.0",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate"
+  }
+}

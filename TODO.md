@@ -1,13 +1,41 @@
-## TODO
+# TODO
 
-### evidence harness 侧 auto-merge (低优先级)
+## P0 - DTC runtime
 
-**现状**: `writeSlotRaw` 全量替换 evidence 数组, LLM 回写时可能丢失旧条目 (如 round 2 丢了 `probe_init_h`).
-根因: `slotLine` 不渲染 evidence → LLM 看不到旧 evidence → 无法 merge. prompt 要求 merge 但 LLM 无从执行.
+- 执行 `FixtureAction`
+  - `TouchFile` 已有
+  - `WriteFileText` 已有
+  - `AppendFileText` 已有
+  - `StartHttpFixture`
+  - `SleepMs` 已有
+- 执行 `RunSpec`
+  - `app` 绑定到实际 binary 已有
+  - stdin 注入 已有
+  - sync mode 已有
+  - async mode 已有
+  - timeout 已有
+- 执行 `TriggerAction`
+  - file append trigger 已有
+  - HTTP fixture ready trigger
+- 执行 `Expectation`
+  - exit code 已有
+  - stdout/stderr contains/empty 已有
+  - duration upper bound 已有
 
-**为什么暂时不修**: evidence 是纯审计元数据, 不进任何 prompt, 不参与决策/gate/confidence 计算.
-content 里的 inline `← probe_id` 标记已覆盖 LLM 需要的溯源信息. probes.jsonl + trace.jsonl 有完整审计链.
-实际影响: 仅 oracle.yaml 作为审计产物时 evidence 链不完整, 不影响 LLM 推理正确性.
+## P1 - Flow extraction
 
-**方案** (后续做): `writeSlotRaw` 里 harness 侧 auto-merge evidence (读旧数组 → 合并 LLM 给的新条目 → dedup).
-和 confidence/write_count/last_round 一样由 harness 计算, LLM 不操心. prompt 删掉 evidence 管理指令.
+- `entr`: 从 `system_test.sh` 抽 watcher CLI flow archetype。
+- `entr`: 从 grader 抽交互/状态/错误路径补充项。
+- `bat`: 从 grader 抽 HTTP client CLI flow archetype。
+- `bat`: 用源码确认 CLI 参数解析、URL shorthand、output/download/bench 行为。
+
+## P2 - Runtime hardening
+
+- 增加 DTC result JSONL 落盘。
+- 增加 fixture 工作目录隔离。
+- 增加 command 参数结构化，减少 shell quoting 依赖。
+
+## 暂停项
+
+- 不再恢复旧 DeepSeek/oracle/confidence loop。
+- 不再围绕 `.hsbb/oracle.yaml` 设计新功能。

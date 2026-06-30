@@ -12,29 +12,22 @@ common deps
                       text,
                       bytestring,
                       aeson,
-                      yaml,
-                      containers,
                       directory,
                       filepath,
                       process,
-                      http-client,
-                      http-client-tls,
-                      http-types,
-                      vector,
-                      time,
-                      unordered-containers
-    ghc-options:      -Wall -Wno-unused-imports -Wno-unused-matches
+                      time
+    ghc-options:      -Wall
 
 library
     import:           deps
     hs-source-dirs:   src
-    exposed-modules:  Blackbox.Types
-                      Blackbox.Oracle
-                      Blackbox.Deepseek
-                      Blackbox.Trace
-                      Blackbox.Init
-                      Blackbox.Loop
-                      Blackbox.Belief
+    exposed-modules:  Blackbox.DTC
+                      Blackbox.DTC.Fixture
+                      Blackbox.DTC.Result
+                      Blackbox.DTC.Runner
+                      Blackbox.DTC.Runtime
+                      Blackbox.DTC.Trigger
+                      Blackbox.DTC.Verifier
 
 executable hsbb
     import:           deps

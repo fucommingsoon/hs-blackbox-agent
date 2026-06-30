@@ -1,0 +1,16 @@
+
+{
+  "method": "GET",
+  "path": "/get",
+  "query": "param1=value1&param2=value2",
+  "params": {
+    "param1": "value1",
+    "param2": "value2"
+  },
+  "headers": {
+    "Host": "localhost:8899",
+    "User-Agent": "bat/0.1.0",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate"
+  }
+}

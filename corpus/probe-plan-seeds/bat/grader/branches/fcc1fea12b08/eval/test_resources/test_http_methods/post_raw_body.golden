@@ -1,0 +1,13 @@
+
+{
+  "method": "POST",
+  "url": "/post",
+  "headers": {
+    "Host": "localhost:8899",
+    "User-Agent": "bat/0.1.0",
+    "Content-Length": "17",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate"
+  },
+  "data": "{\"custom\":\"data\"}"
+}

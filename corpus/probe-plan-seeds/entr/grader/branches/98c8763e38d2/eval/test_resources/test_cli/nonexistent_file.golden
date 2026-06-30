@@ -1,0 +1,2 @@
+executable: unable to stat '/nonexistent/file.txt'
+executable: No regular files to watch

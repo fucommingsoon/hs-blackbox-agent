@@ -1,0 +1,12 @@
+
+{
+  "method": "GET",
+  "path": "/echo?query1=value1",
+  "query": "query1=value1",
+  "headers": {
+    "Host": "localhost:8899",
+    "User-Agent": "bat/0.1.0",
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate"
+  }
+}
