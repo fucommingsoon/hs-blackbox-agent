@@ -4,40 +4,45 @@ module Blackbox.DTC.Runner
     ( runSpec
     ) where
 
-import           Control.Concurrent      (forkIO)
-import           Control.Exception       (evaluate)
+import           Control.Concurrent      (MVar, forkIO, newEmptyMVar,
+                                           putMVar, takeMVar, threadDelay,
+                                           tryReadMVar)
+import           Control.Exception       (IOException, catch)
+import           Data.IORef              (IORef, modifyIORef', newIORef,
+                                           readIORef)
 import qualified Data.Text               as T
 import           Data.Text               (Text)
 import           Data.Time.Clock         (diffUTCTime, getCurrentTime)
 import           System.Exit             (ExitCode (..))
-import           System.IO               (Handle, hClose, hGetContents,
-                                           hPutStr)
+import           System.IO               (Handle, hClose, hGetChar,
+                                           hPutStr, hWaitForInput)
 import           System.Process          (CreateProcess (..), StdStream (..),
-                                           createProcess,
+                                           ProcessHandle, createProcess,
                                            readCreateProcessWithExitCode,
                                            shell, terminateProcess,
                                            waitForProcess)
 import           System.Timeout          (timeout)
 
 import           Blackbox.DTC
+import           Blackbox.DTC.Env
 import           Blackbox.DTC.Result
 import           Blackbox.DTC.Trigger    (runTriggers)
 
 
-runSpec :: FilePath -> RunSpec -> [TriggerAction] -> IO ProcessCapture
-runSpec appPath spec triggers =
+runSpec :: DtcEnv -> FilePath -> RunSpec -> [TriggerAction] -> IO ProcessCapture
+runSpec env appPath spec triggers =
     case rsMode spec of
-        RunSync  -> runSync appPath spec
-        RunAsync -> runAsync appPath spec triggers
+        RunSync  -> runSync env appPath spec
+        RunAsync -> runAsync env appPath spec triggers
 
 
-runSync :: FilePath -> RunSpec -> IO ProcessCapture
-runSync appPath spec = do
+runSync :: DtcEnv -> FilePath -> RunSpec -> IO ProcessCapture
+runSync env appPath spec = do
     start <- getCurrentTime
     outcome <- timeout (rsTimeoutMs spec * 1000) $
         readCreateProcessWithExitCode
-            (shell (renderCmd appPath (rsCmd spec)))
-            (maybe "" T.unpack (rsStdin spec))
+            (shell (renderCmd env appPath (rsCmd spec)))
+            (maybe "" (T.unpack . expandText env) (rsStdin spec))
     end <- getCurrentTime
     let durMs = floor (diffUTCTime end start * 1000)
     case outcome of
@@ -47,6 +52,7 @@ runSync appPath spec = do
                 , pcStdout = ""
                 , pcStderr = "timeout"
                 , pcDurationMs = durMs
+                , pcStopReason = TimedOut
                 }
         Just (exitCode, out, err) ->
             pure ProcessCapture
@@ -54,63 +60,130 @@ runSync appPath spec = do
                 , pcStdout = T.pack out
                 , pcStderr = T.pack err
                 , pcDurationMs = durMs
+                , pcStopReason = ProcessExited
                 }
 
 
-runAsync :: FilePath -> RunSpec -> [TriggerAction] -> IO ProcessCapture
-runAsync appPath spec triggers = do
+runAsync :: DtcEnv -> FilePath -> RunSpec -> [TriggerAction] -> IO ProcessCapture
+runAsync env appPath spec triggers = do
     start <- getCurrentTime
-    let cp = (shell (renderCmd appPath (rsCmd spec)))
+    let cp = (shell (renderCmd env appPath (rsCmd spec)))
             { std_in = CreatePipe
             , std_out = CreatePipe
             , std_err = CreatePipe
             }
     (mIn, mOut, mErr, ph) <- createProcess cp
-    writeStdin mIn (rsStdin spec)
-    _ <- forkIO (runTriggers triggers)
-    outcome <- timeout (rsTimeoutMs spec * 1000) (waitForProcess ph)
+    writeStdin env mIn (rsStdin spec)
+    outRef <- newIORef ""
+    errRef <- newIORef ""
+    _ <- forkIO (streamHandle outRef mOut)
+    _ <- forkIO (streamHandle errRef mErr)
+    exitVar <- newEmptyMVar
+    _ <- forkIO (waitForProcess ph >>= putMVar exitVar)
+    _ <- forkIO (runTriggers env triggers)
+    outcome <- monitorProcess ph exitVar outRef errRef (rsTimeoutMs spec) (rsStopWhen spec)
     end <- getCurrentTime
     let durMs = floor (diffUTCTime end start * 1000)
-    case outcome of
-        Nothing -> do
-            terminateProcess ph
-            out <- forceRead mOut
-            err <- forceRead mErr
-            pure ProcessCapture
-                { pcExit = Nothing
-                , pcStdout = out
-                , pcStderr = if T.null err then "timeout" else err <> "\ntimeout"
-                , pcDurationMs = durMs
-                }
-        Just exitCode -> do
-            out <- forceRead mOut
-            err <- forceRead mErr
-            pure ProcessCapture
-                { pcExit = Just (exitCodeToInt exitCode)
-                , pcStdout = out
-                , pcStderr = err
-                , pcDurationMs = durMs
-                }
+    threadDelay 50000
+    out <- readIORef outRef
+    err <- readIORef errRef
+    pure ProcessCapture
+        { pcExit = captureExit outcome
+        , pcStdout = out
+        , pcStderr = case outcome of
+            AsyncTimedOut | T.null err -> "timeout"
+            AsyncTimedOut              -> err <> "\ntimeout"
+            _                          -> err
+        , pcDurationMs = durMs
+        , pcStopReason = captureStopReason outcome
+        }
 
 
-writeStdin :: Maybe Handle -> Maybe Text -> IO ()
-writeStdin Nothing _ = pure ()
-writeStdin (Just h) input = do
-    hPutStr h (maybe "" T.unpack input)
+data AsyncOutcome
+    = AsyncExited ExitCode
+    | AsyncTimedOut
+    | AsyncEvidenceMatched
+
+
+monitorProcess
+    :: ProcessHandle
+    -> MVar ExitCode
+    -> IORef Text
+    -> IORef Text
+    -> Int
+    -> [StopCondition]
+    -> IO AsyncOutcome
+monitorProcess ph exitVar outRef errRef timeoutMs stopWhen =
+    timeout (timeoutMs * 1000) loop >>= maybe onTimeout pure
+  where
+    onTimeout = do
+        terminateProcess ph
+        _ <- timeout 500000 (takeMVar exitVar)
+        pure AsyncTimedOut
+
+    loop = do
+        mexit <- tryReadMVar exitVar
+        case mexit of
+            Just exitCode -> pure (AsyncExited exitCode)
+            Nothing -> do
+                out <- readIORef outRef
+                err <- readIORef errRef
+                if stopMatched stopWhen out err
+                    then do
+                        terminateProcess ph
+                        _ <- timeout 500000 (takeMVar exitVar)
+                        pure AsyncEvidenceMatched
+                    else do
+                        threadDelay 50000
+                        loop
+
+
+streamHandle :: IORef Text -> Maybe Handle -> IO ()
+streamHandle _ Nothing = pure ()
+streamHandle ref (Just h) = loop `catch` ignoreIo
+  where
+    loop = do
+        ready <- hWaitForInput h 50
+        if ready
+            then do
+                ch <- hGetChar h
+                modifyIORef' ref (`T.snoc` ch)
+                loop
+            else loop
+    ignoreIo :: IOException -> IO ()
+    ignoreIo _ = pure ()
+
+
+stopMatched :: [StopCondition] -> Text -> Text -> Bool
+stopMatched conditions out err =
+    any matched conditions
+  where
+    matched (StopWhenStdoutContains needle) = needle `T.isInfixOf` out
+    matched (StopWhenStderrContains needle) = needle `T.isInfixOf` err
+
+
+captureExit :: AsyncOutcome -> Maybe Int
+captureExit (AsyncExited exitCode) = Just (exitCodeToInt exitCode)
+captureExit AsyncTimedOut = Nothing
+captureExit AsyncEvidenceMatched = Nothing
+
+
+captureStopReason :: AsyncOutcome -> CaptureStopReason
+captureStopReason (AsyncExited _) = ProcessExited
+captureStopReason AsyncTimedOut = TimedOut
+captureStopReason AsyncEvidenceMatched = EvidenceMatched
+
+
+writeStdin :: DtcEnv -> Maybe Handle -> Maybe Text -> IO ()
+writeStdin _ Nothing _ = pure ()
+writeStdin env (Just h) input = do
+    hPutStr h (maybe "" (T.unpack . expandText env) input)
     hClose h
 
 
-forceRead :: Maybe Handle -> IO Text
-forceRead Nothing = pure ""
-forceRead (Just h) = do
-    txt <- hGetContents h
-    _ <- evaluate (length txt)
-    pure (T.pack txt)
-
-
-renderCmd :: FilePath -> Text -> String
-renderCmd appPath cmd =
-    T.unpack (replaceAppPrefix (T.pack (shellQuote appPath)) cmd)
+renderCmd :: DtcEnv -> FilePath -> Text -> String
+renderCmd env appPath cmd =
+    T.unpack (replaceAppPrefix (T.pack (shellQuote appPath)) (expandText env cmd))
 
 
 replaceAppPrefix :: Text -> Text -> Text

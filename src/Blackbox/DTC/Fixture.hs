@@ -13,6 +13,7 @@ import           System.Directory   (createDirectoryIfMissing)
 import           System.FilePath    (takeDirectory)
 
 import           Blackbox.DTC
+import           Blackbox.DTC.Env
 
 
 data FixtureState = FixtureState
@@ -20,21 +21,24 @@ data FixtureState = FixtureState
     } deriving (Eq, Show)
 
 
-setupFixtures :: [FixtureAction] -> IO FixtureState
-setupFixtures actions = do
+setupFixtures :: DtcEnv -> [FixtureAction] -> IO FixtureState
+setupFixtures env actions = do
     unsupported <- fmap concat $ forM actions $ \action ->
         case action of
             TouchFile path -> do
-                ensureParent path
-                TIO.writeFile path ""
+                let expanded = expandPath env path
+                ensureParent expanded
+                TIO.writeFile expanded ""
                 pure []
             WriteFileText path txt -> do
-                ensureParent path
-                TIO.writeFile path txt
+                let expanded = expandPath env path
+                ensureParent expanded
+                TIO.writeFile expanded (expandText env txt)
                 pure []
             AppendFileText path txt -> do
-                ensureParent path
-                TIO.appendFile path txt
+                let expanded = expandPath env path
+                ensureParent expanded
+                TIO.appendFile expanded (expandText env txt)
                 pure []
             SleepMs ms -> do
                 threadDelay (ms * 1000)
