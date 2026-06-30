@@ -17,11 +17,15 @@ module Blackbox.Deepseek
     ) where
 
 import           Control.Exception       (SomeException, try)
-import           Control.Monad           (forM)
+import           Control.Monad           (forM, mfilter)
 import qualified Data.Aeson              as A
+import           Data.Aeson              ((.!=), (.:), (.:?), withObject)
+import           Data.Aeson.Types        (Parser, parseEither)
 import qualified Data.Aeson.Key          as Key
 import qualified Data.Aeson.KeyMap       as KM
+import           Data.Bifunctor          (first)
 import qualified Data.ByteString.Lazy    as BL
+import           Data.Maybe              (mapMaybe)
 import qualified Data.Text               as T
 import           Data.Text               (Text)
 import qualified Data.Text.Encoding      as TE
@@ -261,6 +265,34 @@ postChat apiKey model tools msgs = do
         Right v -> pure (parseResponse v)
 
 
+-- parseResponse: 把 Deepseek 响应 JSON 抠成 (content, toolCalls)。
+-- 【路 1 重写】改用 Aeson 自带的 Parser monad (withObject / .: / .:? / .!=)：
+--   * do + <- 真正用上 monad 短路，原来的嵌套 case 金字塔塌成一条直线；
+--   * key 缺失 / 类型不符会自动短路报错，不必手写 Left；
+--   * 顺带消除旧版 `let A.Object choice = V.head arr` 的运行时崩溃隐患——
+--     choice 非对象时这里只给正常的 Left，而不是抛 irrefutable-pattern 异常。
+-- 注：Left/Right 语义与旧版一致；错误文案改由 withObject/.: 自动生成，措辞略有不同。
+parseResponse :: A.Value -> Either Text (Maybe Text, [ToolCall])
+parseResponse = first T.pack . parseEither parser
+  where
+    parser :: A.Value -> Parser (Maybe Text, [ToolCall])
+    parser = withObject "response" $ \o -> do
+        choices <- o .: "choices"
+        case choices :: [A.Object] of
+            (choice:_) -> do
+                m        <- choice .: "message"
+                content  <- m .:? "content"
+                rawCalls <- m .:? "tool_calls" .!= []
+                -- 空串 content 归一成 Nothing；解析失败的 tool_call 静默丢弃
+                pure ( mfilter (not . T.null) content
+                     , mapMaybe parseToolCall rawCalls )
+            [] -> fail "no choices"
+
+
+-- 【旧版 · 已停用，保留供参考】手写嵌套 case 版本。
+-- 缺点：外层 do 是摆设(没用 monad)、case 层层嵌套、且 `let A.Object choice`
+-- 在 choice 非对象时会运行时崩溃。已被上面的「路 1」版本取代。
+{-
 parseResponse :: A.Value -> Either Text (Maybe Text, [ToolCall])
 parseResponse (A.Object o) = do
     case KM.lookup "choices" o of
@@ -278,6 +310,7 @@ parseResponse (A.Object o) = do
                 _ -> Left "no message"
         _ -> Left "no choices"
 parseResponse _ = Left "not an object"
+-}
 
 
 parseToolCall :: A.Value -> Maybe ToolCall

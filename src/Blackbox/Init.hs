@@ -14,6 +14,7 @@ import qualified Data.Text               as T
 import           Data.Text               (Text)
 import qualified Data.Text.IO            as TIO
 import           System.Directory        (doesFileExist, listDirectory)
+import           System.Exit             (die)
 import           System.FilePath         ((</>), takeExtension)
 
 import           Blackbox.Deepseek       (Message (..), runChat, writeSlotTool)
@@ -44,12 +45,6 @@ runInit oracle apiKey model taskDir trace overrides = do
     putStrLn "[init] running fs context probe: ls -la"
     fsLs   <- runShellInDir taskDir "ls -la ."
 
-    -- 2) 一发 --help 当 canonical 自我介绍 (跨 task 几乎都支持; 去掉之前 -h/-?/-V/-v/--version 5 个重复 alias)
-    -- 2) 找到 canonical help: 依次试 --help / -h，取第一个有有效 help 内容的。
-    --    有些工具 (如 entr) 不认 --help，只认 -h。
-    putStrLn "[init] running mechanical help probes (--help, -h)"
-    helpOutcome <- findValidHelp taskDir
-
     let recordInitProbe pid po = do
             appendProbe oracle (probeToJson pid 0 po)
             appendEvent trace "probe_appended" (A.object
@@ -63,11 +58,17 @@ runInit oracle apiKey model taskDir trace overrides = do
     case fsLs of
         Just po -> recordInitProbe "probe_init_fs_ls" po
         Nothing -> pure ()
+
+    -- 2) 找到 canonical help: 依次试 --help / -h，取第一个有有效 help 内容的。
+    --    每个实际尝试都会落 probes.jsonl；若没有有效 help，init 直接失败，不进入 LLM。
+    putStrLn "[init] running mechanical help probes (--help, -h)"
+    (helpAttempts, helpOutcome) <- findValidHelp taskDir
+    mapM_ (uncurry recordInitProbe) helpAttempts
     case helpOutcome of
         Just (pid, po) -> do
-            recordInitProbe pid po
             putStrLn $ "[init] canonical help: " ++ T.unpack pid
-        Nothing -> pure ()
+        Nothing ->
+            die "[init] no valid ./probe help output from --help or -h; prepare the probe environment and rerun hsbb init"
 
     let fsContext = renderInitProbes
            [ ("ls -la .", fsLs)
@@ -115,22 +116,24 @@ renderInitProbes labelOutcomes = T.unlines $ catMaybes (map render1 labelOutcome
 
 
 -- 依次试 ./probe --help / ./probe -h，取第一个 stdout+stderr 有有效 help 内容的。
--- 返回 (probe_id, outcome)，probe_id 为 "probe_init_help" 或 "probe_init_h"。
--- 全部无效时返回 Nothing。
-findValidHelp :: FilePath -> IO (Maybe (Text, ProbeOutcome))
+-- 返回所有实际尝试 + canonical help。全部无效时 canonical 为 Nothing。
+findValidHelp :: FilePath -> IO ([(Text, ProbeOutcome)], Maybe (Text, ProbeOutcome))
 findValidHelp taskDir = go candidates
   where
     candidates =
         [ ("probe_init_help", "./probe --help")
         , ("probe_init_h",    "./probe -h")
         ]
-    go [] = pure Nothing
+    go [] = pure ([], Nothing)
     go ((pid, cmd) : rest) = do
         mPo <- runShellInDir taskDir (T.pack cmd)
         case mPo of
             Just po | isHelpContent po ->
-                pure (Just (pid, po))
-            _ -> go rest
+                pure ([(pid, po)], Just (pid, po))
+            Just po -> do
+                (attempts, valid) <- go rest
+                pure ((pid, po) : attempts, valid)
+            Nothing -> go rest
 
     -- 判定是否真正有效的 help 输出:
     --   1. stderr 含 "invalid option" / "unrecognized" / "unknown" → 明确拒绝, 不是 help

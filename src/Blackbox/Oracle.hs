@@ -515,16 +515,18 @@ uniqueProbeCommands o = do
         | otherwise     = goD (x : seen) xs
 
 
--- 返回最近 N 条 probe 的浓缩视图 (round, cmd, exit, stdout 前 80 字符, stderr 前 80 字符, stdout_bytes, stderr_bytes)
+-- 返回最近 N 条 probe 的浓缩视图
+-- (round, cmd, exit, stdout 前 80 字符, stderr 前 80 字符,
+--  stdout_bytes, stderr_bytes, decision_why, decision_targets)
 -- 用于 decision prompt, 让 LLM 有探索记忆。只保留最后 maxHistoryEntries 条。
-probeHistorySummary :: Oracle -> IO [(Int, Text, Int, Text, Text, Int, Int)]
+probeHistorySummary :: Oracle -> IO [(Int, Text, Int, Text, Text, Int, Int, Text, [Text])]
 probeHistorySummary o = do
     ex <- doesFileExist (probesPath o)
     if not ex then pure []
     else do
         contents <- TIO.readFile (probesPath o)
         let ls = filter (not . T.null) (T.lines contents)
-            entries = [ (rnd, cmd_, exit_, soSlice, seSlice, soBytes, seBytes)
+            entries = [ (rnd, cmd_, exit_, soSlice, seSlice, soBytes, seBytes, why, targets)
                       | line <- ls
                       , Right (A.Object obj) <- [A.eitherDecodeStrict (TE.encodeUtf8 line)]
                       , Just (A.Number rn)   <- [KM.lookup "round" obj]
@@ -538,6 +540,13 @@ probeHistorySummary o = do
                       , let seBytes = T.length se
                       , let soSlice = T.take 80 so
                       , let seSlice = T.take 80 se
+                      , let why = case KM.lookup "decision_why" obj of
+                                      Just (A.String w) -> w
+                                      _                 -> ""
+                      , let targets = case KM.lookup "decision_targets" obj of
+                                          Just (A.Array a) ->
+                                              [ t | A.String t <- V.toList a ]
+                                          _ -> []
                       ]
         pure (takeLast maxHistoryEntries entries)
   where

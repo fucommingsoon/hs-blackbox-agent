@@ -16,11 +16,13 @@ module Blackbox.Loop
 
 import           Control.Exception       (SomeException, try)
 import           Control.Monad           (when)
+import           Data.Char               (isSpace)
 import           Data.IORef              (atomicModifyIORef', newIORef,
                                           readIORef)
 import qualified Data.Aeson              as A
 import qualified Data.Aeson.Key          as Key
 import qualified Data.Aeson.KeyMap       as KM
+import qualified Data.ByteString.Lazy    as BL
 import           Data.List               (find)
 import qualified Data.Text               as T
 import           Data.Text               (Text)
@@ -54,7 +56,7 @@ import           Blackbox.Trace          (TraceHandle, appendEvent,
                                           phaseStart, phaseEnd)
 import           Blackbox.Types          (Action (..), LastResult (..),
                                           ProbeOutcome (..), makeLastResult,
-                                          parseAction)
+                                          parseAction, universalSlots)
 import           Data.Maybe              (fromMaybe)
 
 
@@ -119,7 +121,7 @@ runStep oracle apiKey model taskDir trace overrides = do
                 Nothing -> putStrLn "[step] action returned no outcome"
                 Just po -> do
                     pid <- mkProbeId roundN
-                    appendProbe oracle (probeToJson pid roundN po)
+                    appendProbe oracle (probeToJsonWithAction pid roundN act po)
                     appendEvent trace "probe_appended" (A.object
                         [ "round" A..= roundN
                         , "probe_id" A..= pid
@@ -226,7 +228,7 @@ runLoop oracle apiKey model taskDir trace overrides = do
                             Nothing -> loop startT (roundN + 1) lastResult
                             Just po -> do
                                 pid <- mkProbeId roundN
-                                let probeJson = probeToJson pid roundN po
+                                let probeJson = probeToJsonWithAction pid roundN act po
                                 appendProbe oracle probeJson
                                 let lr = makeLastResult pid po
                                 phaseStart trace (roundTag <> "_integration")
@@ -301,7 +303,7 @@ decisionPhase oracle apiKey model trace roundN lastResult overrides = do
                   <> "\n## 上轮回灌 (last_result)\n" <> lrSection
                   <> hintsSection
                   <> "\n## 你的任务\n基于以上, 决定下一步 action, 直接输出 action JSON。"
-        msgs = [ SystemMsg sysPrompt, UserMsg userPrompt ]
+        msgs = [ SystemMsg sysPrompt, UserMsg (sanitizeDecisionPrompt userPrompt) ]
 
     result <- runChat apiKey model [] {- 决策阶段不暴露任何 tool -}
                 msgs (dispatchTool oracle) (appendEvent trace) 2
@@ -309,15 +311,17 @@ decisionPhase oracle apiKey model trace roundN lastResult overrides = do
     let firstAction = parseActionFromText (crContent result)
     -- 硬拦: 若 LLM 出 verbatim 已执行 cmd 且 why 没声明「重复 probe_xxx」, retry 一次喂 feedback.
     case firstAction of
-        -- 拦截: cmd 里不含 ./probe (LLM 写错二进制名, 如 ./propr / ./prob)
+        -- 拦截: probe action 必须使用 harness 提供的 `app` 占位符。
+        -- harness 会在执行前把 shell token `app` 规范化成 ./probe；
+        -- LLM 不再直接拼二进制名，避免 ./propr / ./prob 之类 typo。
         Just (ActProbe cmd why)
-            | not ("./probe" `T.isInfixOf` cmd) -> do
-                putStrLn $ "[decision] WARN: cmd missing ./probe: " ++ T.unpack cmd
+            | not (hasAppInvocation cmd) -> do
+                putStrLn $ "[decision] WARN: cmd missing app token: " ++ T.unpack cmd
                 appendEvent trace "decision_no_probe_rejected" (A.object
                     [ "cmd"        A..= cmd
                     , "why"        A..= why
                     ])
-                let feedback = "harness 拒绝: cmd 里没有 `./probe`。二进制名是 `./probe` (不是 propr/prob/entr 等), 修正后重发。"
+                let feedback = "harness 拒绝: probe action 必须使用 `app` 作为目标程序占位符, 不要写目标程序的真实路径或名字。示例: `echo /tmp/x | app -n -z echo ok`。"
                     retryMsgs = msgs ++ [ AssistantMsg (Just (crContent result)) []
                                         , UserMsg feedback ]
                 retry <- runChat apiKey model [] retryMsgs
@@ -342,6 +346,11 @@ decisionPhase oracle apiKey model trace roundN lastResult overrides = do
         _ -> pure firstAction
   where
     isExplicitRepeat why = "重复 probe_" `T.isInfixOf` why
+
+
+sanitizeDecisionPrompt :: Text -> Text
+sanitizeDecisionPrompt =
+    T.replace "./probe" "app"
 
 
 parseActionFromText :: Text -> Maybe Action
@@ -375,14 +384,25 @@ extractJsonObject t =
     findMatchingBrace pos d (_ : cs)   = findMatchingBrace (pos + 1) d cs
 
 
-renderHistoryEntry :: (Int, Text, Int, Text, Text, Int, Int) -> Text
-renderHistoryEntry (rnd, cmd_, exit_, soSlice, seSlice, soBytes, seBytes) =
+renderHistoryEntry :: (Int, Text, Int, Text, Text, Int, Int, Text, [Text]) -> Text
+renderHistoryEntry (rnd, cmd_, exit_, soSlice, seSlice, soBytes, seBytes, why, targets) =
     "- [r" <> T.pack (show rnd) <> "] " <> cmd_ <> " -> exit " <> T.pack (show exit_)
+    <> targetPart
+    <> whyPart
     <> " | stdout(" <> T.pack (show soBytes) <> "B): " <> flatOrEmpty soSlice
     <> " | stderr(" <> T.pack (show seBytes) <> "B): " <> flatOrEmpty seSlice
   where
     flatOrEmpty t = let s = T.strip t
                     in if T.null s then "(empty)" else T.replace "\n" " " s
+    targetPart =
+        if null targets
+        then ""
+        else " | targets: " <> T.intercalate "," targets
+    whyPart =
+        let w = T.strip why
+        in if T.null w
+           then ""
+           else " | why: " <> T.take 160 (T.replace "\n" " " w)
 
 
 -- ---------------------------------------------------------------
@@ -439,16 +459,31 @@ gateHeuristic :: Oracle -> TraceHandle -> IO Bool
 gateHeuristic oracle trace = do
     confs <- slotConfidences oracle
     nProbes <- countProbes oracle
+    nDecProbes <- countDecisionProbes oracle
     let mean = sum (map snd confs) / fromIntegral (length confs)
-        continue = mean < 0.6
+        emptySlots = [ sid | (sid, conf) <- confs, conf <= 0 ]
+        continue = mean < 0.6 || not (null emptySlots)
+        reason :: Text
+        reason
+            | not (null emptySlots) =
+                "continue: universal slots still have no probe-backed facts: "
+                <> T.intercalate ", " emptySlots
+            | mean < 0.6 =
+                "continue: confidence mean below threshold"
+            | otherwise =
+                "converge: confidence mean passed threshold and all universal slots touched"
     appendEvent trace "gate_heuristic" (A.object
         [ "mean" A..= mean
         , "confs" A..= confs
         , "n_probes" A..= nProbes
+        , "n_decision_probes" A..= nDecProbes
+        , "empty_slots" A..= emptySlots
         , "continue" A..= continue
+        , "reason" A..= reason
         ])
     putStrLn $ "[gate] heuristic: mean=" ++ show (round (mean * 100) :: Int)
-            ++ "% -> " ++ (if continue then "continue" else "converge")
+            ++ "%, empty_slots=" ++ show (map T.unpack emptySlots)
+            ++ " -> " ++ (if continue then "continue" else "converge")
     pure continue
 
 
@@ -506,7 +541,8 @@ gateSystemPrompt = T.unlines
 executeAction :: FilePath -> Action -> IO (Maybe ProbeOutcome)
 executeAction taskDir (ActProbe cmd _) = do
     putStrLn $ "  $ " ++ T.unpack cmd
-    runShellInDir taskDir cmd
+    outcome <- runShellInDir taskDir (normalizeAppCommand cmd)
+    pure (fmap (\po -> po { poCmd = cmd }) outcome)
 executeAction taskDir (ActGrep pattern files _) = do
     let cmd = "grep -nH -E " <> T.pack (show (T.unpack pattern)) <> " "
               <> T.unwords files
@@ -555,6 +591,72 @@ parseDockerWrapper body =
 -- shell single-quote escape: ' → '\''
 shSingleQuote :: Text -> Text
 shSingleQuote t = "'" <> T.replace "'" "'\\''" t <> "'"
+
+
+hasAppInvocation :: Text -> Bool
+hasAppInvocation = containsShellToken "app"
+
+
+normalizeAppCommand :: Text -> Text
+normalizeAppCommand = replaceShellToken "app" "./probe"
+
+
+containsShellToken :: Text -> Text -> Bool
+containsShellToken token input = T.unpack token `elem` shellTokens (T.unpack input)
+
+
+replaceShellToken :: Text -> Text -> Text -> Text
+replaceShellToken token repl input =
+    T.pack (go True Nothing (T.unpack input))
+  where
+    tokenS = T.unpack token
+    replS  = T.unpack repl
+
+    go _ _ [] = []
+    go canStart quote s@(c:cs)
+        | quote == Nothing
+        , canStart
+        , tokenS `isPrefixOfString` s
+        , tokenBoundary (drop (length tokenS) s) =
+            replS ++ go False Nothing (drop (length tokenS) s)
+        | otherwise =
+            let quote' = updateQuote quote c
+                canStart' = quote' == Nothing && isShellBoundary c
+            in c : go canStart' quote' cs
+
+
+shellTokens :: String -> [String]
+shellTokens = go True Nothing []
+  where
+    go _ _ cur [] = [reverse cur | not (null cur)]
+    go canStart quote cur (c:cs)
+        | quote == Nothing && isShellBoundary c =
+            let rest = go True Nothing [] cs
+            in if null cur then rest else reverse cur : rest
+        | otherwise =
+            let quote' = updateQuote quote c
+            in go canStart quote' (c:cur) cs
+
+
+updateQuote :: Maybe Char -> Char -> Maybe Char
+updateQuote Nothing '\'' = Just '\''
+updateQuote Nothing '"'  = Just '"'
+updateQuote (Just '\'') '\'' = Nothing
+updateQuote (Just '"') '"' = Nothing
+updateQuote q _ = q
+
+
+isShellBoundary :: Char -> Bool
+isShellBoundary c = isSpace c || c `elem` ("|&;()<>" :: String)
+
+
+tokenBoundary :: String -> Bool
+tokenBoundary [] = True
+tokenBoundary (c:_) = isShellBoundary c
+
+
+isPrefixOfString :: String -> String -> Bool
+isPrefixOfString pre s = take (length pre) s == pre
 
 -- 给定 cmd 和 task dir, 决定真正要交给 host shell 跑的 cmd。
 -- 若 task 是 docker wrapper 且 cmd 真的调用 ./probe, 重写为 docker exec 形态。
@@ -627,7 +729,21 @@ renderLastResult lr = T.unlines
 
 
 probeToJson :: Text -> Int -> ProbeOutcome -> A.Value
-probeToJson pid roundN po = A.object
+probeToJson pid roundN po = A.object (probeFields pid roundN po)
+
+
+probeToJsonWithAction :: Text -> Int -> Action -> ProbeOutcome -> A.Value
+probeToJsonWithAction pid roundN act po = A.object $
+    probeFields pid roundN po ++
+    [ "decision"       A..= actionValue act
+    , "decision_why"   A..= actionWhy act
+    , "decision_kind"  A..= actionKind act
+    , "decision_targets" A..= actionTargets act
+    ]
+
+
+probeFields :: Text -> Int -> ProbeOutcome -> [(Key.Key, A.Value)]
+probeFields pid roundN po =
     [ "id"           A..= pid
     , "round"        A..= roundN
     , "cmd"          A..= poCmd po
@@ -648,11 +764,58 @@ describeAction (ActStop r)        = "stop: " ++ T.unpack r
 
 
 actionJson :: Action -> Text
-actionJson (ActProbe c w) = "{\"action\":\"probe\",\"cmd\":\"" <> c <> "\",\"why\":\"" <> w <> "\"}"
-actionJson (ActGrep p fs w) = "{\"action\":\"grep\",\"pattern\":\"" <> p <> "\",\"files\":["
-    <> T.intercalate "," [ "\"" <> f <> "\"" | f <- fs ] <> "],\"why\":\"" <> w <> "\"}"
-actionJson (ActOther k c w) = "{\"action\":\"other\",\"kind\":\"" <> k <> "\",\"cmd\":\"" <> c <> "\",\"why\":\"" <> w <> "\"}"
-actionJson (ActStop w) = "{\"action\":\"stop\",\"why\":\"" <> w <> "\"}"
+actionJson = TE.decodeUtf8 . BL.toStrict . A.encode . actionValue
+
+
+actionValue :: Action -> A.Value
+actionValue (ActProbe c w) = A.object
+    [ "action" A..= ("probe" :: Text)
+    , "cmd" A..= c
+    , "why" A..= w
+    , "target_slots" A..= targetsFromWhy w
+    ]
+actionValue (ActGrep p fs w) = A.object
+    [ "action" A..= ("grep" :: Text)
+    , "pattern" A..= p
+    , "files" A..= fs
+    , "why" A..= w
+    , "target_slots" A..= targetsFromWhy w
+    ]
+actionValue (ActOther k c w) = A.object
+    [ "action" A..= ("other" :: Text)
+    , "kind" A..= k
+    , "cmd" A..= c
+    , "why" A..= w
+    , "target_slots" A..= targetsFromWhy w
+    ]
+actionValue (ActStop w) = A.object
+    [ "action" A..= ("stop" :: Text)
+    , "why" A..= w
+    , "target_slots" A..= targetsFromWhy w
+    ]
+
+
+actionWhy :: Action -> Text
+actionWhy (ActProbe _ w)   = w
+actionWhy (ActGrep _ _ w) = w
+actionWhy (ActOther _ _ w)= w
+actionWhy (ActStop w)     = w
+
+
+actionKind :: Action -> Text
+actionKind (ActProbe _ _)    = "probe"
+actionKind (ActGrep _ _ _)   = "grep"
+actionKind (ActOther k _ _)  = "other:" <> k
+actionKind (ActStop _)       = "stop"
+
+
+actionTargets :: Action -> [Text]
+actionTargets = targetsFromWhy . actionWhy
+
+
+targetsFromWhy :: Text -> [Text]
+targetsFromWhy why =
+    [ sid | sid <- universalSlots, sid `T.isInfixOf` why ]
 
 
 
@@ -681,9 +844,11 @@ decisionSystemPrompt = T.unlines
     , "  如果动态栏提示「探索集中度」, 说明你在某个槽上花太多轮了 — 换一个维度。"
     , ""
     , "action 协议:"
-    , "  探一发: {\"action\":\"probe\",\"cmd\":\"./probe <args>\",\"why\":\"<意图+目标槽>\"}"
+    , "  探一发: {\"action\":\"probe\",\"cmd\":\"app <args>\",\"why\":\"<意图+目标槽>\"}"
     , "  搜源码: {\"action\":\"grep\",\"pattern\":\"<regex>\",\"files\":[\"<path>\"],\"why\":\"...\"}"
     , "  其他:   {\"action\":\"other\",\"kind\":\"shell/http/docker\",\"cmd\":\"<cmd>\",\"why\":\"...\"}"
+    , ""
+    , "`app` 是 harness 提供的目标程序占位符。不要写目标程序的真实路径或名字; 如果需要管道或重定向, 写 `echo /tmp/x | app -n -z echo ok`。"
     , ""
     , "why 字段 = 这一发的意图 + 预期 + 目标槽位。两块:"
     , "  1) 意图: 我想用它做 X (具体使用场景), 预期 Y"
