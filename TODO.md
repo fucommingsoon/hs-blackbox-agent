@@ -1,6 +1,28 @@
 # TODO
 
-## P0 - Generic runtime hardening
+## P0 - Next PB task integration
+
+- 从 `docs/pb/tasks.md` 选择下一个 PB 项目，优先选能暴露新 archetype 或现有
+  archetype 明显缺口的任务，不要为了单项目分数堆 step。
+- 新任务融合顺序：
+  1. 下载 upstream source，并锁定到 `task.yaml` 的 repository + commit。
+  2. 获取 PB grader/eval tests；本地 metadata 不够时，从 task image/container
+     抽取。
+  3. 对 reference executable 做最小首探，只用于确认入口和明显命令面，不把
+     `--help` 当完整材料。
+  4. 用 source/grader/results 做 archetype decision 和 binding generation。
+  5. `validate-binding` / `plan-binding` / 同容器 `run-binding`。
+  6. 对照 source/grader/results 评估还原度，决定是扩 archetype、拆新 archetype，
+     还是收敛去下一个任务。
+- 当前已有 seed：
+  - `entr`: watcher CLI seed，9/9 Pass。
+  - `bat`: HTTP client CLI seed，14/14 Pass。
+  - `atlas`: structured subcommand CLI seed，source-audited 13/13 Pass，但仍不是
+    hard task reconstruction-ready。
+- 框架补丁必须由新任务暴露的共性缺口牵引。不要脱离新任务先做
+  structured command、artifact index、readiness gate 等低痛感优化。
+
+## P1 - Task-driven runtime hardening
 
 - 增加 command 参数结构化，减少 shell quoting 依赖。
 - 保持 `app 参数1 参数2 ...` 的 plan 写法，但 runtime 内部不要长期依赖 shell string。
@@ -12,10 +34,10 @@
 - 根据 `binding_ready` 的外部 binding 生成 project spec/plan 已有初版：`plan-binding` / `run-binding` 支持 `HttpClientCli`。
 - result 后续可补 artifact index，把 `${WORK}` 下的重要文件挂到 result。
 - LLM 系统层已有 DeepSeek API adapter 和输出校验器；后续补更细的 schema 校验、response pretty/JSONL 包格式、以及外发数据脱敏/裁剪策略。
-- `docs/pb/tasks.md` 已有 201 个 ProgramBench task 清单；后续要把 `unknown`
+- `docs/pb/tasks.md` 已有 201 个 ProgramBench task 清单；后续可把 `unknown`
   difficulty 的 35 个任务做难度归类或单独分桶。
 
-## P1 - DTC runtime components
+## P2 - DTC runtime components
 
 - 执行 `FixtureAction`
   - `TouchFile` 已有
@@ -39,14 +61,14 @@
   - stdout/stderr contains/empty 已有
   - duration upper bound 已有
 
-## P2 - Flow extraction
+## P3 - Flow extraction
 
 - `entr`: 从 `system_test.sh` 抽 watcher CLI flow archetype。
 - `entr`: 从 grader 抽交互/状态/错误路径补充项。
 - `bat`: `HttpClientCli` requirements + reusable flow builder 已有；当前主流 14-step flow 已覆盖 method/query/header/json/form/raw/status/pretty、response body print、basic auth、download file。
 - `bat`: 用源码/grader 继续确认 URL shorthand、proxy/TLS、bench、大文件/流式响应行为，优先补到 archetype flow 或独立 reusable flow，不要继续堆 `batPlan` 单项目 step。
-- PB 200+ 融合：继续挑选能暴露新 archetype 或现有 archetype 缺口的项目，不要
-  以单项目得分为目标堆 step。
+- PB 200+ 融合：主线在 P0。继续挑选能暴露新 archetype 或现有 archetype 缺口的
+  项目，不要以单项目得分为目标堆 step。
 - PB 任务选择必须从 `docs/pb/tasks.md` 出发，避免继续依赖仓库外历史清单。
 - `ariga__atlas.6d81150`: source/grader 已补到 corpus。第一版
   `StructuredSubcommandCli` binding-driven flow 最初是在 source corpus 缺失时

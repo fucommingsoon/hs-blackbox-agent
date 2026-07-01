@@ -6,6 +6,18 @@
 
 项目已经从旧的 LLM/oracle/confidence 黑盒循环切到 Haskell DTC 主线。
 
+## 当前推荐动作
+
+下一步不要优先给主框架做不痛不痒的 hardening。当前更高价值动作是继续融合
+新的 PB 测试项目：从 `docs/pb/tasks.md` 选一个能暴露新 archetype 或现有
+archetype 缺口的任务，先取齐 upstream source + PB grader/eval tests，再走
+source/grader/results -> archetype decision -> binding -> 同容器 run-binding ->
+结果评估。
+
+只有当新任务真实暴露出 runtime 或 archetype 的共性缺口时，才回到主框架补丁。
+不要为了“看起来在优化框架”去做 structured command、artifact index 或 gate
+细化；这些是支撑项，不是当前主线。
+
 当前可编译代码里没有 LLM API 调用，也没有旧 DeepSeek/oracle/confidence loop。DeepSeek 被放在系统层边缘节点：消费 Haskell 机械读取和提纯后的 source/grader/results 包，负责黑盒类型决策、binding 生成、执行结果评估、oracle/report 提案。它不参与每步 probe hot path，不直接驱动 runtime。
 
 PB 200+ 任务和后续外部约 800 个项目是同一条路线：不要扩展成 1000 个
@@ -203,13 +215,22 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 
 ## 下一步优先级
 
-1. 不要恢复旧 LLM loop。先保持 Haskell DTC 为执行和验证核心；DeepSeek 只能消费 `system-prepare` 的机械读取包做系统层决策/评估/oracle 提案。
-2. 继续加强 readiness gate 的判定粒度，避免只看 surface 名称导致虚高；特别是 HTTP request body/header/query 这类行为要有 fixture-side evidence。
-3. bat 下一步不要继续堆随机 grader case；优先补 request artifact index、URL shorthand、proxy/TLS/large or streaming response 这些还未进入当前 14-step 主流 flow 的行为面。
-4. 类 entr 任务不要复制 `entrPlan` step；先跑 `dtc requirements WatcherCli`，再新增一个 `WatcherCliSpec`，最后用 `watcherCliSteps` 生成流程。
-5. 做 generic runtime hardening：structured command，减少 shell quoting 依赖。
-6. 给 result 增加 artifact index，把 `${WORK}` 下的重要文件挂到 result。
-7. atlas 下一步在 source-audited 13-step 起点上继续扩
+1. 继续融合新的 PB 项目，而不是先做抽象框架优化。候选必须从
+   `docs/pb/tasks.md` 出发，优先选择能暴露新 archetype 或现有 archetype
+   明显缺口的任务。
+2. 新任务流程固定为：取齐 source + grader/eval tests -> 首探 reference
+   executable -> `system-prepare`/Codex 决策 archetype -> 生成并校验 binding ->
+   同容器 `run-binding` -> 对照 source/grader/results 评估还原度。
+3. 不要恢复旧 LLM loop。先保持 Haskell DTC 为执行和验证核心；DeepSeek 只能消费 `system-prepare` 的机械读取包做系统层决策/评估/oracle 提案。
+4. 类 entr/bat/atlas 任务不要复制旧 seed 的具体 step；先跑对应
+   `dtc requirements <Archetype>`，再让决策节点从 source/upstream
+   tests/grader/help 中抽取 binding，并用 reusable flow builder 生成流程。
+5. 如果新项目暴露共性缺口，再补 archetype 或 runtime：readiness gate、
+   structured command、artifact index、HTTP request evidence 等都属于被任务牵引的
+   支撑工作，不是单独优先项。
+6. bat 后续如果被选中继续扩，不要堆随机 grader case；优先补 request artifact
+   index、URL shorthand、proxy/TLS/large or streaming response 这些主流行为面。
+7. atlas 若回头继续扩，应在 source-audited 13-step 起点上继续扩
    `StructuredSubcommandCli`/文件状态 archetype，优先补 config 错误路径和更多
    schema/migration edge cases，不要在 catalog 里硬堆 atlas 专属 step。
 

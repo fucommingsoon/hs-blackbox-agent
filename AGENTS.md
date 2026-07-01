@@ -22,7 +22,13 @@ BIN=$(find dist-newstyle -name hsbb -type f -perm +111 | head -1)
 
 ## 当前主线：Haskell DTC
 
-优先修改 `src/Blackbox/DTC.hs`、`src/Blackbox/DTC/Archetype/*`、`src/Blackbox/DTC/System.hs` 及后续 DTC runtime 模块。当前没有真实 LLM API 调用；`system-prepare` 已是现有系统层入口，用来机械读取 corpus/results 并生成 DeepSeek 输入包。
+当前优先事项不是泛泛地给主框架打补丁，而是继续融合新的 PB 测试项目。新窗口接手时，
+先看 `STATUS.md` 的“当前推荐动作”和 `docs/pb/tasks.md`，选一个能暴露新
+archetype 或现有 archetype 缺口的任务；只有当新任务证明 runtime/archetype
+缺能力时，再修改 `src/Blackbox/DTC.hs`、`src/Blackbox/DTC/Archetype/*`、
+`src/Blackbox/DTC/System.hs` 或后续 DTC runtime 模块。
+
+当前没有真实 LLM API 调用；`system-prepare` 已是现有系统层入口，用来机械读取 corpus/results 并生成 DeepSeek 输入包。
 
 工作流边界：
 
@@ -144,6 +150,7 @@ hsbb legacy ...
 
 待办只维护在 `TODO.md`，不要在本文件复制一份。当前最重要的守则：
 
+- 下一步先融合新 PB 项目；框架补丁要由新任务暴露的共性缺口牵引。
 - 不要恢复旧 confidence / gate prompt。
 - DeepSeek 只走系统层：先用 `dtc system-prepare` 机械读取并提纯 corpus/results，再让 DeepSeek 做 archetype decision、binding generation、result evaluation、oracle proposal。
 - `system-call` 会把 packet 内容发给外部 DeepSeek API，必须在用户明确接受该数据外发边界后执行；未授权时只用 `system-validate` 做离线校验。
