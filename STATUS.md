@@ -10,7 +10,8 @@
 
 PB 200+ 任务和后续外部约 800 个项目是同一条路线：不要扩展成 1000 个
 `dtc run <project>` 指令，而是沉淀 archetype flow + binding-driven execution。
-PB 融合的具体 runbook 在 `PB_INTEGRATION.md`。
+当前本地 ProgramBench metadata 有 201 个 task，完整清单在
+`PB_TASK_INVENTORY.md`；PB 融合的具体 runbook 在 `PB_INTEGRATION.md`。
 
 ## 当前代码面
 
@@ -63,6 +64,13 @@ PB 融合的具体 runbook 在 `PB_INTEGRATION.md`。
 
 PB task README/SPEC 可作为公开初始文档，但不是 DTC seed truth。融合新项目时
 优先回到 source/upstream tests/grader/results。
+
+## PB task inventory
+
+完整 PB task 清单已维护在 `PB_TASK_INVENTORY.md`。当前 metadata root 为
+`/Users/kangxin/.cache/uv/archive-v0/sTrhsMs9voIeKDQ8/programbench/data/tasks`，
+共 201 个 task：hard 18、medium 120、easy 28、unknown 35。`unknown` 表示
+当前 `task.yaml` 未标 difficulty，不代表无需处理。
 
 ## 命令
 

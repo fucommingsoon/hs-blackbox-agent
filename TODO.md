@@ -12,6 +12,8 @@
 - 根据 `binding_ready` 的外部 binding 生成 project spec/plan 已有初版：`plan-binding` / `run-binding` 支持 `HttpClientCli`。
 - result 后续可补 artifact index，把 `${WORK}` 下的重要文件挂到 result。
 - LLM 系统层已有 DeepSeek API adapter 和输出校验器；后续补更细的 schema 校验、response pretty/JSONL 包格式、以及外发数据脱敏/裁剪策略。
+- `PB_TASK_INVENTORY.md` 已有 201 个 ProgramBench task 清单；后续要把 `unknown`
+  difficulty 的 35 个任务做难度归类或单独分桶。
 
 ## P1 - DTC runtime components
 
@@ -45,6 +47,7 @@
 - `bat`: 用源码/grader 继续确认 URL shorthand、auth、download、print section、bench 行为，优先补到 archetype flow 或独立 reusable flow，不要继续堆 `batPlan` 单项目 step。
 - PB 200+ 融合：继续挑选能暴露新 archetype 或现有 archetype 缺口的项目，不要
   以单项目得分为目标堆 step。
+- PB 任务选择必须从 `PB_TASK_INVENTORY.md` 出发，避免继续依赖仓库外历史清单。
 
 ## 已完成 runtime 基础能力
 
