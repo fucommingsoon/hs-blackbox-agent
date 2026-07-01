@@ -69,7 +69,21 @@ $BIN dtc run entr --app=corpus/probe-plan-seeds/entr/source/github/entr --out=/p
 
 PB reference 环境不要用 host `hsbb` 直接通过 `../pb28easy/<task>/probe` 跑 DTC
 作为标准结果。标准方案是把 Linux `hsbb` 放进 PB task container，与
-`/workspace/executable` 同容器执行；具体命令见 `docs/pb/README.md`。
+`/workspace/executable` 同容器执行；具体入口见 `scripts/pb-dtc-runner.sh` 和
+`docs/pb/README.md`。
+
+PB 新任务首探示例：
+
+```bash
+scripts/pb-dtc-runner.sh --task=ariga__atlas.6d81150 --mode=app -- --help
+```
+
+binding 生成后再切到同容器 DTC：
+
+```bash
+scripts/pb-dtc-runner.sh --task=<task> -- \
+  dtc run-binding --binding=/tmp/binding.json --app=/workspace/executable --out=/tmp/hsbb-dtc-run
+```
 
 类 entr 任务接入方式：
 

@@ -59,11 +59,58 @@ timeout 6 docker exec -i pbref-real-<task> /workspace/executable "$@"
 runtime、黑盒共享同一个文件系统和网络视角；不要把 bridge 问题混进业务
 flow 评估。
 
-### 一次性编译 Linux hsbb
+### 标准入口
+
+优先使用脚本，不要手工拼接 runner 容器命令：
+
+```bash
+scripts/pb-dtc-runner.sh --task=<owner__repo.commit> --mode=app -- --help
+scripts/pb-dtc-runner.sh --task=<owner__repo.commit> -- \
+  dtc run-binding --binding=/tmp/binding.json --app=/workspace/executable --out=/tmp/hsbb-dtc-run
+```
+
+脚本做三件事：
+
+- 按 `owner__repo.commit` 推断 image：
+  `programbench/<owner>_1776_<repo>.<commit>:task`。
+- 复用 `/private/tmp/hsbb-linux-amd64`；缺失或传 `--build-hsbb` 时，复用
+  `hsbb-pb-builder` 编译 Linux amd64 版 `hsbb`。
+- 创建一次性 PB task container，注入 `hsbb`，运行 `/workspace/executable`
+  或 `hsbb ...`，并把 stdout/stderr/exit code 和 DTC output 拷回 host。
+
+示例：
+
+```bash
+scripts/pb-dtc-runner.sh --build-hsbb \
+  --task=ariga__atlas.6d81150 \
+  --mode=app \
+  --out=/private/tmp/hsbb-pb-atlas-help \
+  -- --help
+```
+
+`hsbb` 模式下，`--` 后面是传给容器内 `hsbb` 的参数：
+
+```bash
+scripts/pb-dtc-runner.sh \
+  --task=eradman__entr.8e2e8b4 \
+  --out=/private/tmp/hsbb-pb-entr \
+  -- dtc run entr --app=/workspace/executable --out=/tmp/hsbb-dtc-run
+```
+
+结果目录中固定包含：
+
+- `runner.env`
+- `stdout.txt`
+- `stderr.txt`
+- `exit_code`
+- `container-out/`，仅当容器内 `--container-out` 路径存在时写出。
+
+### 手工编译 Linux hsbb
 
 本机 macOS 产物是 Mach-O，不能直接进 Linux 容器。可以用 PB task image
 起一个 builder 容器，在容器内装 ghcup/GHC/Cabal 并编译 Linux amd64 版
-`hsbb`：
+`hsbb`。这套流程已被 `scripts/pb-dtc-runner.sh --build-hsbb` 包装；下面命令
+只作为排障参考：
 
 ```bash
 docker rm -f hsbb-pb-builder >/dev/null 2>&1 || true

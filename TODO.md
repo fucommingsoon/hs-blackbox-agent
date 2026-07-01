@@ -6,9 +6,9 @@
 - 保持 `app 参数1 参数2 ...` 的 plan 写法，但 runtime 内部不要长期依赖 shell string。
 - readiness gate 继续加强：不能只看 surface 名称齐不齐，还要看关键 step 是否真实命中对应证据。
 - 继续把 binding spec catalog 数据化，避免 Haskell 入口堆项目。
-- 把 PB 同容器执行方案产品化：复用 Linux `hsbb` builder/cache，把 task image +
-  `/workspace/executable` + `hsbb dtc run-binding` 变成稳定 runner，不依赖 host
-  `docker exec` wrapper。
+- PB 同容器 runner 已有：`scripts/pb-dtc-runner.sh` 复用 Linux `hsbb`
+  builder/cache，把 task image + `/workspace/executable` + `hsbb dtc ...`
+  包成稳定入口；后续增强 artifact index 和 binding 分发。
 - 根据 `binding_ready` 的外部 binding 生成 project spec/plan 已有初版：`plan-binding` / `run-binding` 支持 `HttpClientCli`。
 - result 后续可补 artifact index，把 `${WORK}` 下的重要文件挂到 result。
 - LLM 系统层已有 DeepSeek API adapter 和输出校验器；后续补更细的 schema 校验、response pretty/JSONL 包格式、以及外发数据脱敏/裁剪策略。
@@ -48,6 +48,10 @@
 - PB 200+ 融合：继续挑选能暴露新 archetype 或现有 archetype 缺口的项目，不要
   以单项目得分为目标堆 step。
 - PB 任务选择必须从 `docs/pb/tasks.md` 出发，避免继续依赖仓库外历史清单。
+- `ariga__atlas.6d81150`: 已完成 runner 首探；下一步抽
+  `StructuredSubcommandCli` + 文件副作用 flow，覆盖 help/completion/version/license、
+  nested subcommand、config/env/var 继承、`migrate new/hash/validate`、
+  `schema fmt`，不要直接堆 atlas 专属步骤。
 
 ## 已完成 runtime 基础能力
 
@@ -70,6 +74,8 @@
 - continuous watcher evidence flow 已显式化：证据出现后 runtime 主动停止长驻进程，结果写出 `drrStopReason`。
 - PB 同容器真实执行已验证：Linux `hsbb` 注入 task container 后，`entr` 9/9
   Pass，`bat` 11/11 Pass。执行细节见 `docs/pb/README.md`。
+- `scripts/pb-dtc-runner.sh` 已有，支持 `--mode=app` 首探
+  `/workspace/executable`，以及默认 `hsbb` 模式执行同容器 DTC。
 
 ## 已完成 entr seed flow
 

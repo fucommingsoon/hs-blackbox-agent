@@ -136,6 +136,23 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
   `11/11 Pass`。结果分别导出到：
   - `/private/tmp/hsbb-dtc-in-docker-entr/entr/20260701-061958-628670417000/results.jsonl`
   - `/private/tmp/hsbb-dtc-in-docker-bat/bat/20260701-062001-112626085000/results.jsonl`
+- PB 同容器 runner 已产品化为 `scripts/pb-dtc-runner.sh`。它会推断 task image、
+  复用或重建 `/private/tmp/hsbb-linux-amd64`，创建一次性 task container，
+  注入 `hsbb`，并收集 stdout/stderr/exit code/DTC output。
+- `ariga__atlas.6d81150` 已开始首探：image
+  `programbench/ariga_1776_atlas.6d81150:task` 已拉取成功；通过 runner 跑过
+  `--help`、`version`、`license`、`migrate --help`、`schema --help`、
+  `completion bash`，均 exit 0。结果目录：
+  - `/private/tmp/hsbb-pb-atlas-help`
+  - `/private/tmp/hsbb-pb-atlas-version`
+  - `/private/tmp/hsbb-pb-atlas-license`
+  - `/private/tmp/hsbb-pb-atlas-migrate-help`
+  - `/private/tmp/hsbb-pb-atlas-schema-help`
+  - `/private/tmp/hsbb-pb-atlas-completion-bash`
+- atlas 初步方向不是现有 `WatcherCli` / `HttpClientCli` 的直接套用，而更像
+  `StructuredSubcommandCli` + 文件系统副作用 flow：help/completion/version/license、
+  nested subcommand routing、config/env/var 继承、`migrate new/hash/validate`、
+  `schema fmt` 的文件生成和格式化。
 - 不再把 host `hsbb` + PB `docker exec` wrapper 当作标准执行方案。该模式会让
   `${WORK}` 文件和 `127.0.0.1` HTTP fixture 跨环境失真。
 
@@ -149,7 +166,8 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 4. 类 entr 任务不要复制 `entrPlan` step；先跑 `dtc requirements WatcherCli`，再新增一个 `WatcherCliSpec`，最后用 `watcherCliSteps` 生成流程。
 5. 做 generic runtime hardening：structured command，减少 shell quoting 依赖。
 6. 给 result 增加 artifact index，把 `${WORK}` 下的重要文件挂到 result。
-7. 从 `entr` 和 `bat` 源码 + grader 中继续抽可复用 flow archetype，但避免过度绑定单项目细节。
+7. atlas 下一步先抽一个通用 `StructuredSubcommandCli`/文件副作用 archetype，
+   不要在 catalog 里硬堆 atlas 专属 step。
 
 ## 不要做
 
