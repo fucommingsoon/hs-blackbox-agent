@@ -139,6 +139,16 @@ scripts/pb-dtc-runner.sh \
 `docs/pb/bindings/ariga__atlas.6d81150.json`。后续 DeepSeek 节点接入时，应
 产出同构 JSON，并通过 `dtc validate-binding` / `dtc plan-binding` 验证。
 
+注意：atlas 的早期 11-step flow 是在 source corpus 尚未落地时扩出的，这个
+过程不合格。现在 atlas source/grader 已补到：
+
+- `corpus/probe-plan-seeds/atlas/source/github`
+- `corpus/probe-plan-seeds/atlas/grader`
+
+随后已基于这些材料重新审计 binding 字段，并完成同容器 source-audited 复跑。
+后续继续扩 atlas 时，仍必须从 source/grader/results 对齐开始，不要因为旧结果
+显示 11/11 Pass，就跳过材料核验。
+
 ### 手工编译 Linux hsbb
 
 本机 macOS 产物是 Mach-O，不能直接进 Linux 容器。可以用 PB task image
@@ -237,8 +247,9 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
   - 结果：`/private/tmp/hsbb-pb-bat-dtc-v3/container-out/bat/20260701-080127-528043513000/results.jsonl`
   - 新增覆盖：response body print、basic auth、download file。response header
     print 需要 TTY 才能稳定验证，当前 pipe capture 下不纳入 flow。
-- `atlas`: `11/11 Pass`
-  - 结果：`/private/tmp/hsbb-pb-atlas-dtc-v4/container-out/atlas/20260701-080142-505559548000/results.jsonl`
+- `atlas`: source-audited `11/11 Pass`
+  - 最新结果：`/private/tmp/hsbb-pb-atlas-dtc-source-audit/container-out/atlas/20260701-080917-987701050000/results.jsonl`
+  - 旧 provisional 结果：`/private/tmp/hsbb-pb-atlas-dtc-v4/container-out/atlas/20260701-080142-505559548000/results.jsonl`
   - 覆盖：help、version、license、completion、nested help、`schema fmt`、
     `migrate new/hash/validate`、checksum mismatch。
 
@@ -261,9 +272,9 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
   pretty=false、response body print、basic auth、download file。它代表常见 HTTP
   请求构造和输出渲染可用，但还不能代表完整 `bat` 使用：URL shorthand、
   proxy/TLS、bench、大文件/流式响应等还未进入当前 flow。
-- `atlas 11/11 Pass` 能说明多子命令 CLI 和 migration 文件状态主干开始成立：
+- `atlas source-audited 11/11 Pass` 能说明多子命令 CLI 和 migration 文件状态主干开始成立：
   help/completion/version/license、nested help、format、new/hash/validate、
-  checksum mismatch。但它还不是 atlas 高难度任务的 reconstruction-ready：
+  checksum mismatch。但它仍不是 atlas 高难度任务的 reconstruction-ready：
   config/env/var 继承、schema/migration 复杂边缘路径仍缺。
 
 因此 entr/bat 当前更准确的定位是“两个可复用 archetype seed 已被真实 reference

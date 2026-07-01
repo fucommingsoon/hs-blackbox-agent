@@ -24,7 +24,13 @@ DTC seed corpus 只放两类材料：
 | 上游源码 | 判断程序公开能力、参数面、实现约束 |
 | 测试流程 | 上游自带测试和 PB grader，用来抽取真实行为面 |
 
-当前 seed 在 `corpus/probe-plan-seeds/`，每个项目只保留 `source/` 和 `grader/`。`pb-metadata`、PB task README/SPEC、旧 distill 产物都不作为 DTC seed。
+当前 seed 在 `corpus/probe-plan-seeds/`，每个项目只保留 `source/` 和 `grader/`。已落地：
+
+- `entr`: `source/github` + `grader`
+- `bat`: `source/github` + `grader`
+- `atlas`: `source/github` + `grader`
+
+`pb-metadata`、PB task README/SPEC、旧 distill 产物都不作为 DTC seed。
 
 融合新 PB 项目前，必须先拿到 upstream source 和 PB grader/eval tests；grader
 必要时从 task image/container 中抽取。`--help` 首探和 binding 生成只能在材料
@@ -71,14 +77,17 @@ $HSBB dtc run entr --app=<binary> --out=out/dtc-runs
 
 - `entr`: 上游 `system_test.sh` 覆盖主行为面较强，已抽出 9 个 watcher CLI DTC flow，并用 corpus 内真实 `entr` binary 验证通过。
 - `bat`: 上游自带测试主要覆盖 `httplib`，CLI 主行为主要由 PB grader 暴露。当前已走 `requirements HttpClientCli -> validate-binding -> plan-binding -> run-binding`，跑通 14 个 seed flow：help、basic GET、default GET、default POST、GET query items、headers、PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering、response body print、basic auth、download file。
-- `atlas`: 高难度 PB 任务，当前由 Codex 人工替代 LLM 抽取
-  `StructuredSubcommandCli` binding，已在 PB task container 内跑通 11 个
-  binding-driven flow：help、version、license、completion、migrate/schema nested help、
-  `schema fmt`、`migrate new`、`migrate hash`、`migrate validate`、checksum mismatch。
+- `atlas`: 高难度 PB 任务，source/grader 已补入 corpus。此前由 Codex 人工替代
+  LLM 抽取的 `StructuredSubcommandCli` binding 最初是在源码 corpus 缺失时扩出
+  11 个 flow，这个过程不合格；现已按 atlas source/grader 重新审计关键字段，
+  并在 PB task container 内复跑 11/11 Pass。覆盖：help、version、license、
+  completion、migrate/schema nested help、`schema fmt`、`migrate new`、
+  `migrate hash`、`migrate validate`、checksum mismatch。它可作为
+  source-audited seed 起点，但还不是 reconstruction-ready。
 
 PB reference 环境标准执行方式是把 Linux 版 `hsbb` 注入 task container，与
 `/workspace/executable` 同容器运行。最近一次真实结果：`entr` 为 `9/9 Pass`，
-`bat` 为 `14/14 Pass`，`atlas` 为 `11/11 Pass`。这比 host `hsbb` +
+`bat` 为 `14/14 Pass`，`atlas` 为 source-audited `11/11 Pass`。这比 host `hsbb` +
 `docker exec` wrapper 更可靠，因为 fixture、trigger 和黑盒共享同一个文件/网络视角。
 
 这些 Pass 的含义是“当前 DTC plan 覆盖的 behavior/spec surfaces 成立”，不是

@@ -59,62 +59,62 @@
     },
     "formatInputPath": {
       "value": "${WORK}/schema.hcl",
-      "source": "manual container probe for atlas schema fmt",
+      "source": "cmd/atlas/internal/cmdapi/schema.go schemaFmtCmd plus grader schema_fmt file tests",
       "confidence": "medium"
     },
     "formatInputText": {
       "value": "schema \"users\"{\ncolumn \"id\"{type=int}\n}\n",
-      "source": "manual container probe for atlas schema fmt",
+      "source": "schema fmt source/parser behavior plus grader schema_fmt formats-file tests; fixture text still chosen by Codex",
       "confidence": "medium"
     },
     "formatCommand": {
       "value": "schema fmt ${WORK}/schema.hcl",
-      "source": "manual container probe and eval.tests.test_schema_fmt names",
+      "source": "cmd/atlas/internal/cmdapi/schema.go Use: fmt [path ...] and grader schema_fmt tests",
       "confidence": "high"
     },
     "formatCheckNeedle": {
       "value": "type = int",
-      "source": "manual container probe observed formatted file content",
+      "source": "schema fmt source behavior and manual container probe observed formatted file content",
       "confidence": "high"
     },
     "migrationDirPath": {
       "value": "${WORK}/migrations",
-      "source": "manual container probe for atlas migrate new",
+      "source": "cmd/atlas/internal/migrate/migrate.go DefaultDirName and grader migrate custom-dir tests",
       "confidence": "medium"
     },
     "migrationNewCommand": {
       "value": "migrate new --dir file://${WORK}/migrations create_users",
-      "source": "manual container probe and eval.tests.test_migrate_new names",
+      "source": "cmd/atlas/internal/cmdapi/migrate.go Use: new [flags] [name] and grader migrate_new tests",
       "confidence": "high"
     },
     "migrationFileNeedle": {
       "value": "create_users",
-      "source": "manual container probe observed generated migration filename suffix",
+      "source": "cmdapi migrate_new tests assert generated migration filenames; manual probe observed suffix",
       "confidence": "high"
     },
     "migrationSqlFileName": {
       "value": "20240101000000_create_users.sql",
-      "source": "manual container probe for atlas migrate hash/validate",
+      "source": "sql/migrate hash/validate tests use versioned .sql fixtures; exact fixture name chosen by Codex",
       "confidence": "high"
     },
     "migrationSqlText": {
       "value": "CREATE TABLE users (id int);\n",
-      "source": "manual container probe for atlas migrate hash/validate",
+      "source": "sql/migrate hash/validate file-content tests plus manual probe; exact SQL fixture chosen by Codex",
       "confidence": "medium"
     },
     "migrationHashCommand": {
       "value": "migrate hash --dir file://${WORK}/migrations",
-      "source": "manual container probe and tests.json migrate hash references",
+      "source": "cmd/atlas/internal/cmdapi/migrate.go Use: hash [flags], sql/migrate WriteSumFile, grader migrate_hash tests",
       "confidence": "high"
     },
     "migrationValidateCommand": {
       "value": "migrate validate --dir file://${WORK}/migrations",
-      "source": "manual container probe and tests.json migrate validate references",
+      "source": "cmd/atlas/internal/cmdapi/migrate.go Use: validate [flags], sql/migrate Validate, grader migrate_validate tests",
       "confidence": "high"
     },
     "migrationChecksumErrorNeedle": {
       "value": "checksum mismatch",
-      "source": "manual corrupt-file probe stderr",
+      "source": "sql/migrate/dir.go ErrChecksumMismatch and manual corrupt-file probe stderr",
       "confidence": "high"
     }
   }
