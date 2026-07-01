@@ -26,6 +26,10 @@ DTC seed corpus 只放两类材料：
 
 当前 seed 在 `corpus/probe-plan-seeds/`，每个项目只保留 `source/` 和 `grader/`。`pb-metadata`、PB task README/SPEC、旧 distill 产物都不作为 DTC seed。
 
+融合新 PB 项目前，必须先拿到 upstream source 和 PB grader/eval tests；grader
+必要时从 task image/container 中抽取。`--help` 首探和 binding 生成只能在材料
+齐备或缺口已明确记录后进行。
+
 PB 200+ 任务和后续外部约 800 个项目走同一套机制：通过 archetype
 requirements + binding-driven execution 逐步融合，不为每个项目新增一条 CLI
 命令。当前本地 ProgramBench metadata 中有 201 个 task，完整清单见
@@ -76,6 +80,12 @@ PB reference 环境标准执行方式是把 Linux 版 `hsbb` 注入 task contain
 `/workspace/executable` 同容器运行。最近一次真实结果：`entr` 为 `9/9 Pass`，
 `bat` 为 `11/11 Pass`，`atlas` 第一版为 `8/8 Pass`。这比 host `hsbb` +
 `docker exec` wrapper 更可靠，因为 fixture、trigger 和黑盒共享同一个文件/网络视角。
+
+这些 Pass 的含义是“当前 DTC plan 覆盖的 behavior/spec surfaces 成立”，不是
+“项目完整正常使用”或“PB grader 全覆盖”。entr/bat 当前是可复用 archetype seed
+验证通过：entr 覆盖 watcher CLI 主干行为，bat 覆盖 HTTP client CLI 主流请求/响应
+行为；未进入 flow 的平台差异、边缘命令、auth/download/print/TLS/大文件等仍需继续
+从 source/grader 中抽取。
 
 ## 架构边界
 

@@ -122,6 +122,15 @@ help/version/license/completion/nested help，以及 `schema fmt`、`migrate new
 
 只把源码和测试流程当 seed。`pb-metadata`、PB task README/SPEC、旧 distill 产物属于干扰项。
 
+融合新 PB 项目时，先拿材料再跑流程：
+
+1. 下载 upstream source，并锁定到 `task.yaml` 的 repository + commit。
+2. 获取 PB grader/eval tests；本地 metadata 不够时，从 task image/container 中抽取。
+3. 再做 reference executable 首探、`system-prepare`、archetype 判断和 binding 生成。
+
+不要只根据 `--help` 或 README/SPEC 写 binding。DTC `Pass` 只证明当前 plan 覆盖的
+behavior/spec surfaces 成立，不证明项目完整正常使用或 grader 全覆盖。
+
 ## 已删除旧逻辑
 
 旧 DeepSeek/oracle/confidence loop 已从编译面删除。不要恢复这些命令：

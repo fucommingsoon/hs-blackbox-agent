@@ -40,6 +40,25 @@ PB 融合时只把这些视作高价值材料：
 DTC 的输入事实。PB task README/SPEC 可以作为初始公开文档，但不是 seed
 truth；优先回到 source/grader/results。
 
+### 新项目材料准备
+
+融合任何新测试项目时，第一步不是写 binding，也不是先跑 `--help`，而是先把
+可复盘材料落到本地：
+
+1. 下载 upstream source，锁定到 `task.yaml` 中的 repository + commit。若
+   upstream 无法直接获取，再记录缺口，不能用 README/SPEC 代替源码判断。
+2. 获取 PB grader/eval tests。优先用本地 ProgramBench metadata 中的
+   `tests.json`；如果 grader 只存在于 task image 或运行环境里，就先下载
+   image，再从 image/container 中抽取 grader 文件。
+3. 保留 reference executable 的真实运行结果，尤其是 `--help`、错误路径、
+   fixture 交互、文件副作用等可观察证据。
+4. 把 source/grader/results 作为 `system-prepare` 和 Codex/LLM binding
+   extraction 的输入；只有在这些材料齐备或缺口已明确记录后，才进入
+   `requirements -> validate-binding -> plan-binding -> run-binding`。
+
+材料目录仍应遵守 seed corpus 边界：只放源码和测试流程。`pb-metadata`、
+旧 `.hsbb`、旧 distill/oracle/confidence 产物不能混入新 DTC seed。
+
 ## 同容器执行方案
 
 PB reference probe 通常长这样：
@@ -218,6 +237,27 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
 这两个结果支撑当前判断：`entr` / `bat` 两个 archetype seed 已经达到可支撑
 60-70% 等价行为实现复原的密度。这里说的是可观察业务行为和关键实现约束，
 不是逐行源码结构。
+
+### Pass 语义边界
+
+`Pass` 只表示当前 DTC plan 中的 step expectation 全部成立，不等价于“这个项目
+已经能被完整正常使用”，也不等价于“PB grader 会全过”。
+
+- `entr 9/9 Pass` 能说明 watcher CLI archetype 的核心行为成立：参数/错误路径、
+  stdin watch list、文件变更触发、child stdout/exit code、oneshot、`/_`
+  替换、目录变更。它已经比较接近日常使用中的主干 watcher 行为，但没有覆盖
+  平台差异、性能、复杂 shell 组合、信号处理等所有真实使用面。
+- `bat 11/11 Pass` 能说明 HTTP client CLI archetype 的主流请求/响应面成立：
+  help、GET/POST/PUT、query/header/json/form/raw body、non-2xx body、
+  pretty=false。它代表常见 HTTP 请求构造和输出渲染可用，但还不能代表完整
+  `bat` 使用：URL shorthand、auth、download、print sections、bench、TLS/代理、
+  大文件/流式响应等还未进入当前 flow。
+
+因此 entr/bat 当前更准确的定位是“两个可复用 archetype seed 已被真实 reference
+executable 验证通过”。它们能证明 Haskell DTC 的方向和同容器执行方案有效，
+但不能单独作为“项目完整正常使用/完整测试”的证明。后续 readiness gate 必须把
+Pass 数量和 behavior/spec surface 覆盖、grader/source 对照、artifact evidence
+一起看。
 
 ## 下一步融合策略
 
