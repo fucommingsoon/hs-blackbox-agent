@@ -80,6 +80,7 @@ structuredSubcommandPlanFromBinding :: BindingInput -> Either Text DtcPlan
 structuredSubcommandPlanFromBinding input = do
     name <- field "name" input
     successExitCode <- intField "successExitCode" input
+    configEnvVar <- structuredConfigEnvVar input
     spec <- StructuredSubcommandCliSpec
         <$> pure name
         <*> pure (bindingSources input)
@@ -105,12 +106,41 @@ structuredSubcommandPlanFromBinding input = do
         <*> field "migrationHashCommand" input
         <*> field "migrationValidateCommand" input
         <*> field "migrationChecksumErrorNeedle" input
+        <*> pure configEnvVar
     pure DtcPlan
         { dpName = name
         , dpInputs = bindingSources input
         , dpArchetypes = [StructuredSubcommandCli]
         , dpSteps = structuredSubcommandCliSteps spec
         }
+
+
+structuredConfigEnvVar :: BindingInput -> Either Text (Maybe ConfigEnvVarSpec)
+structuredConfigEnvVar input =
+    case present of
+        [] -> Right Nothing
+        fields
+            | length fields == length names -> do
+                spec <- ConfigEnvVarSpec
+                    <$> fmap T.unpack (field "configFilePath" input)
+                    <*> field "configFileText" input
+                    <*> fmap T.unpack (field "configSchemaPath" input)
+                    <*> field "configSchemaText" input
+                    <*> field "configEnvVarCommand" input
+                    <*> field "configEnvVarNeedle" input
+                Right (Just spec)
+            | otherwise ->
+                Left ("structured config/env/var binding requires all optional fields when any are present: " <> T.intercalate "," names)
+  where
+    names =
+        [ "configFilePath"
+        , "configFileText"
+        , "configSchemaPath"
+        , "configSchemaText"
+        , "configEnvVarCommand"
+        , "configEnvVarNeedle"
+        ]
+    present = [name | name <- names, lookupValue name input /= Nothing]
 
 
 bindingSources :: BindingInput -> [CorpusInput]

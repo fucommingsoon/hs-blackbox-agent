@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Blackbox.DTC.Archetype.StructuredSubcommandCli
-    ( StructuredSubcommandCliSpec (..)
+    ( ConfigEnvVarSpec (..)
+    , StructuredSubcommandCliSpec (..)
     , structuredSubcommandCliRequirements
     , structuredSubcommandCliSteps
     ) where
@@ -37,6 +38,17 @@ data StructuredSubcommandCliSpec = StructuredSubcommandCliSpec
     , scsMigrationHashCommand :: Text
     , scsMigrationValidateCommand :: Text
     , scsMigrationChecksumErrorNeedle :: Text
+    , scsConfigEnvVar         :: Maybe ConfigEnvVarSpec
+    } deriving (Eq, Show)
+
+
+data ConfigEnvVarSpec = ConfigEnvVarSpec
+    { cevsConfigFilePath :: FilePath
+    , cevsConfigFileText :: Text
+    , cevsSchemaFilePath :: FilePath
+    , cevsSchemaFileText :: Text
+    , cevsCommand        :: Text
+    , cevsNeedle         :: Text
     } deriving (Eq, Show)
 
 
@@ -137,6 +149,30 @@ structuredSubcommandCliRequirements = ArchetypeRequirement
             "Stable substring expected when validation detects a checksum mismatch."
             ["grader checksum error tests", "manual corrupt-file probe"]
             ["checksum mismatch"]
+        , optional "configFilePath"
+            "Fixture path for a project/config file used by config/env/var flows. Use ${WORK}/... for isolation."
+            ["grader config/env tests", "source project config tests"]
+            ["${WORK}/atlas.hcl"]
+        , optional "configFileText"
+            "Project/config file text that defines at least one environment and variable-backed data source."
+            ["source project/schema tests", "grader config variables tests"]
+            ["variable \"path\" { type = string }\\n..."]
+        , optional "configSchemaPath"
+            "Fixture schema or state file referenced through --var or config data sources."
+            ["source schema inspect tests", "grader config variables tests"]
+            ["${WORK}/schema_var.hcl"]
+        , optional "configSchemaText"
+            "Schema/state fixture text consumed through the config/env/var command."
+            ["source schema inspect tests", "grader config variables tests"]
+            ["schema \"main\" {}\\ntable \"t1\" { ... }"]
+        , optional "configEnvVarCommand"
+            "Command tail that exercises --config, --env, and --var together. May reference ${WORK}."
+            ["grader config/env/var tests", "source cmdapi schema/migrate tests"]
+            ["schema inspect --config file://${WORK}/atlas.hcl --env app --var path=${WORK}/schema_var.hcl --url env://app"]
+        , optional "configEnvVarNeedle"
+            "Stable substring expected from the config/env/var command output."
+            ["grader config variable assertions", "source schema inspect expected output"]
+            ["table \"t1\""]
         ]
     }
 
@@ -155,6 +191,7 @@ structuredSubcommandCliSteps spec =
        , migrationValidateStep spec
        , migrationValidateCorruptStep spec
        ]
+    <> maybe [] ((: []) . configEnvVarStep spec) (scsConfigEnvVar spec)
 
 
 topLevelHelpStep :: StructuredSubcommandCliSpec -> PlanStep
@@ -386,6 +423,33 @@ migrationValidateCorruptStep spec =
     migrationFilePath = scsMigrationDirPath spec <> "/" <> T.unpack (scsMigrationSqlFileName spec)
 
 
+configEnvVarStep :: StructuredSubcommandCliSpec -> ConfigEnvVarSpec -> PlanStep
+configEnvVarStep spec configSpec =
+    step spec "config_env_var" "cli.config_env_var" SyncProbe
+        [ WriteFileText (cevsConfigFilePath configSpec) (cevsConfigFileText configSpec)
+        , WriteFileText (cevsSchemaFilePath configSpec) (cevsSchemaFileText configSpec)
+        ]
+        [bs "cli.config", bs "cli.env_selection", bs "cli.var_injection", bs "file.input", bs "stdout.schema"]
+        [ss "fixture.file", ss "run.cmd", ss "expect.exit", ss "expect.stdout"]
+        (RunSpec
+            (T.unwords
+                [ "app"
+                , cevsCommand configSpec
+                ]
+            )
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        []
+        [ ExpectExit (scsSuccessExitCode spec)
+        , ExpectStdoutContains (cevsNeedle configSpec)
+        ]
+        [ "Validates a source/grader-backed config + environment selection + variable injection flow."
+        ]
+
+
 step
     :: StructuredSubcommandCliSpec
     -> Text
@@ -440,3 +504,8 @@ ss = SpecSurface
 required :: Text -> Text -> [Text] -> [Text] -> BindingField
 required name description sourceHints examples =
     BindingField name Required description sourceHints examples
+
+
+optional :: Text -> Text -> [Text] -> [Text] -> BindingField
+optional name description sourceHints examples =
+    BindingField name Optional description sourceHints examples

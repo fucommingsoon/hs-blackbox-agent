@@ -170,21 +170,23 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
   抽出的 binding 在 `docs/pb/bindings/ariga__atlas.6d81150.json`。
 - atlas binding-driven 同容器 DTC 最初在源码 corpus 缺失时扩出 provisional
   `11/11 Pass`，这个过程不合格；现已补入 source/grader，并按源码/grader
-  重新审计关键字段后复跑 source-audited `11/11 Pass`：
+  重新审计关键字段后扩到 source-audited `12/12 Pass`：
   `help`、`version`、`license`、`completion bash`、`migrate --help`、
   `schema --help`、`schema fmt` 文件原地格式化、`migrate new` 生成 migration
   文件和 `atlas.sum`、`migrate hash`、`migrate validate`、checksum mismatch
-  错误路径。最新结果：
+  错误路径、`--config/--env/--var` 配置驱动 schema inspect。最新结果：
+  - `/private/tmp/hsbb-pb-atlas-dtc-config-env-var/container-out/atlas/20260701-082403-737927710000/results.jsonl`
+  旧 source-audited 11-step 结果：
   - `/private/tmp/hsbb-pb-atlas-dtc-source-audit/container-out/atlas/20260701-080917-987701050000/results.jsonl`
   旧 provisional 结果：
   - `/private/tmp/hsbb-pb-atlas-dtc-v4/container-out/atlas/20260701-080142-505559548000/results.jsonl`
 - 当前已在源码/grader 中找到 `schema fmt`、`migrate new/hash/validate`、
-  `atlas.sum`、checksum mismatch、help/version/license/completion 的证据；最新
-  复跑结果确认 11 个 step 全部 Pass。这个结论只升级为 source-audited seed
-  起点，不代表 atlas 高难度任务已足够复原。
-- atlas 还没有覆盖全量高难度面：config/env/var 继承、更多 schema/migration
-  edge cases 都还需要继续抽到 `StructuredSubcommandCli` 或拆成新的文件状态
-  archetype。
+  `atlas.sum`、checksum mismatch、help/version/license/completion、config/env/var
+  的证据；最新结果确认 12 个 step 全部 Pass。这个结论只升级为
+  source-audited seed 起点，不代表 atlas 高难度任务已足够复原。
+- atlas 还没有覆盖全量高难度面：config 错误路径、更多 schema/migration edge
+  cases、复杂 migration diff/lint/apply 状态机都还需要继续抽到
+  `StructuredSubcommandCli` 或拆成新的文件状态 archetype。
 - 不再把 host `hsbb` + PB `docker exec` wrapper 当作标准执行方案。该模式会让
   `${WORK}` 文件和 `127.0.0.1` HTTP fixture 跨环境失真。
 
@@ -198,9 +200,9 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 4. 类 entr 任务不要复制 `entrPlan` step；先跑 `dtc requirements WatcherCli`，再新增一个 `WatcherCliSpec`，最后用 `watcherCliSteps` 生成流程。
 5. 做 generic runtime hardening：structured command，减少 shell quoting 依赖。
 6. 给 result 增加 artifact index，把 `${WORK}` 下的重要文件挂到 result。
-7. atlas 下一步在 source-audited 11-step 起点上继续扩
-   `StructuredSubcommandCli`/文件状态 archetype，优先补 config/env/var 继承和
-   更多 schema/migration edge cases，不要在 catalog 里硬堆 atlas 专属 step。
+7. atlas 下一步在 source-audited 12-step 起点上继续扩
+   `StructuredSubcommandCli`/文件状态 archetype，优先补 config 错误路径和更多
+   schema/migration edge cases，不要在 catalog 里硬堆 atlas 专属 step。
 
 ## 不要做
 

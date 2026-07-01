@@ -116,6 +116,36 @@
       "value": "checksum mismatch",
       "source": "sql/migrate/dir.go ErrChecksumMismatch and manual corrupt-file probe stderr",
       "confidence": "high"
+    },
+    "configFilePath": {
+      "value": "${WORK}/atlas.hcl",
+      "source": "cmd/atlas/internal/cmdapi/schema_test.go InspectDataSrc and grader config_env tests",
+      "confidence": "high"
+    },
+    "configFileText": {
+      "value": "variable \"path\" {\n  type = string\n}\ndata \"hcl_schema\" \"app\" {\n  path = var.path\n}\nenv \"app\" {\n  dev = \"sqlite://dev?mode=memory&_fk=1\"\n  app = data.hcl_schema.app.url\n}\n",
+      "source": "cmd/atlas/internal/cmdapi/schema_test.go InspectDataSrc config fixture",
+      "confidence": "high"
+    },
+    "configSchemaPath": {
+      "value": "${WORK}/schema_var.hcl",
+      "source": "cmd/atlas/internal/cmdapi/schema_test.go InspectDataSrc schema fixture",
+      "confidence": "high"
+    },
+    "configSchemaText": {
+      "value": "schema \"main\" {}\ntable \"t1\" {\n  schema = schema.main\n  column \"id\" {\n    type = int\n  }\n}\n",
+      "source": "cmd/atlas/internal/cmdapi/schema_test.go InspectDataSrc schema fixture",
+      "confidence": "high"
+    },
+    "configEnvVarCommand": {
+      "value": "schema inspect --config file://${WORK}/atlas.hcl --env app --var path=${WORK}/schema_var.hcl --url env://app",
+      "source": "cmd/atlas/internal/cmdapi/schema_test.go InspectDataSrc command and grader config/env/var tests",
+      "confidence": "high"
+    },
+    "configEnvVarNeedle": {
+      "value": "table \"t1\"",
+      "source": "cmd/atlas/internal/cmdapi/schema_test.go InspectDataSrc expected output",
+      "confidence": "high"
     }
   }
 }
