@@ -48,10 +48,10 @@
 - PB 200+ 融合：继续挑选能暴露新 archetype 或现有 archetype 缺口的项目，不要
   以单项目得分为目标堆 step。
 - PB 任务选择必须从 `docs/pb/tasks.md` 出发，避免继续依赖仓库外历史清单。
-- `ariga__atlas.6d81150`: 已完成 runner 首探；下一步抽
-  `StructuredSubcommandCli` + 文件副作用 flow，覆盖 help/completion/version/license、
-  nested subcommand、config/env/var 继承、`migrate new/hash/validate`、
-  `schema fmt`，不要直接堆 atlas 专属步骤。
+- `ariga__atlas.6d81150`: 第一版 `StructuredSubcommandCli` binding-driven flow
+  已跑通 8/8，覆盖 help/completion/version/license、nested help、`schema fmt`、
+  `migrate new`。下一步补 config/env/var 继承、`migrate hash/validate`、
+  checksum 损坏路径，不要直接堆 atlas 专属步骤。
 
 ## 已完成 runtime 基础能力
 
@@ -76,6 +76,10 @@
   Pass，`bat` 11/11 Pass。执行细节见 `docs/pb/README.md`。
 - `scripts/pb-dtc-runner.sh` 已有，支持 `--mode=app` 首探
   `/workspace/executable`，以及默认 `hsbb` 模式执行同容器 DTC。
+- runner 已支持 `--copy=host:container`，用于把 binding JSON 等 host 材料显式
+  放进 task container。
+- `StructuredSubcommandCli` 已有第一版 requirements + binding-driven plan builder；
+  atlas 样例 binding 在 `docs/pb/bindings/ariga__atlas.6d81150.json`。
 
 ## 已完成 entr seed flow
 

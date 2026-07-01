@@ -8,6 +8,7 @@ module Blackbox.DTC.Requirements
 import           Data.Text (Text)
 
 import           Blackbox.DTC.Archetype.HttpClientCli (httpClientCliRequirements)
+import           Blackbox.DTC.Archetype.StructuredSubcommandCli (structuredSubcommandCliRequirements)
 import           Blackbox.DTC.Archetype.WatcherCli (watcherCliRequirements)
 import           Blackbox.DTC.Types
 
@@ -15,6 +16,7 @@ import           Blackbox.DTC.Types
 requirementsByArchetype :: Archetype -> Maybe ArchetypeRequirement
 requirementsByArchetype WatcherCli = Just watcherCliRequirements
 requirementsByArchetype HttpClientCli = Just httpClientCliRequirements
+requirementsByArchetype StructuredSubcommandCli = Just structuredSubcommandCliRequirements
 requirementsByArchetype FileInputCli = Nothing
 requirementsByArchetype StdoutFormatterCli = Nothing
 
@@ -26,4 +28,7 @@ archetypeRequirementByName "watcher" = requirementsByArchetype WatcherCli
 archetypeRequirementByName "HttpClientCli" = requirementsByArchetype HttpClientCli
 archetypeRequirementByName "http-client-cli" = requirementsByArchetype HttpClientCli
 archetypeRequirementByName "http-client" = requirementsByArchetype HttpClientCli
+archetypeRequirementByName "StructuredSubcommandCli" = requirementsByArchetype StructuredSubcommandCli
+archetypeRequirementByName "structured-subcommand-cli" = requirementsByArchetype StructuredSubcommandCli
+archetypeRequirementByName "subcommand-cli" = requirementsByArchetype StructuredSubcommandCli
 archetypeRequirementByName _ = Nothing

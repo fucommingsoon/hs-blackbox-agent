@@ -49,6 +49,7 @@ $HSBB dtc plan bat
 $HSBB dtc coverage entr
 $HSBB dtc requirements WatcherCli
 $HSBB dtc requirements HttpClientCli
+$HSBB dtc requirements StructuredSubcommandCli
 $HSBB dtc validate-binding --binding=<file>
 $HSBB dtc plan-binding --binding=<file>
 $HSBB dtc run-binding --binding=<file> --app=<binary> --out=out/dtc-runs
@@ -66,18 +67,23 @@ $HSBB dtc run entr --app=<binary> --out=out/dtc-runs
 
 - `entr`: 上游 `system_test.sh` 覆盖主行为面较强，已抽出 9 个 watcher CLI DTC flow，并用 corpus 内真实 `entr` binary 验证通过。
 - `bat`: 上游自带测试主要覆盖 `httplib`，CLI 主行为主要由 PB grader 暴露。当前已走 `requirements HttpClientCli -> validate-binding -> plan-binding -> run-binding`，跑通 11 个 seed flow：help、basic GET、default GET、default POST、GET query items、headers、PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering。
+- `atlas`: 高难度 PB 任务，当前由 Codex 人工替代 LLM 抽取
+  `StructuredSubcommandCli` binding，已在 PB task container 内跑通 8 个
+  binding-driven flow：help、version、license、completion、migrate/schema nested help、
+  `schema fmt`、`migrate new`。
 
 PB reference 环境标准执行方式是把 Linux 版 `hsbb` 注入 task container，与
 `/workspace/executable` 同容器运行。最近一次真实结果：`entr` 为 `9/9 Pass`，
-`bat` 为 `11/11 Pass`。这比 host `hsbb` + `docker exec` wrapper 更可靠，因为
-fixture、trigger 和黑盒共享同一个文件/网络视角。
+`bat` 为 `11/11 Pass`，`atlas` 第一版为 `8/8 Pass`。这比 host `hsbb` +
+`docker exec` wrapper 更可靠，因为 fixture、trigger 和黑盒共享同一个文件/网络视角。
 
 ## 架构边界
 
 旧 DeepSeek/oracle/confidence loop 已从编译面删除。当前代码面分三层：
 
 - Haskell runtime：fixture/run/trigger/capture/verify，负责确定性执行。
-- Haskell archetype：`WatcherCli`、`HttpClientCli` 这类可复用业务 flow builder。
+- Haskell archetype：`WatcherCli`、`HttpClientCli`、`StructuredSubcommandCli`
+  这类可复用业务 flow builder。
 - LLM 系统层：`system-prepare` 机械读取 source/grader/results 并生成 DeepSeek 输入包，后续 API adapter 只能消费这个包。
 
 类 entr 任务不要复制 `entrPlan` 的具体 step。先用 `hsbb dtc requirements WatcherCli` 取得参数需求，再由决策节点从 source/upstream tests/grader/help 中抽取 binding，并用 `hsbb dtc validate-binding --binding=<file>` 校验是否 `binding_ready`；当前 plan 落地形态仍是新建一个 `WatcherCliSpec`，填入 flag、changed-path token、错误文案和 source/grader 来源，再用 `watcherCliSteps` 生成通用 watcher flow。

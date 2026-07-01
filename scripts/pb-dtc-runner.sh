@@ -15,6 +15,7 @@ Options:
   --out=<host-dir>          Host output directory. Default: /private/tmp/hsbb-pb-run-<task>-<timestamp>.
   --container-out=<dir>     Container DTC output dir to copy back in hsbb mode. Default: /tmp/hsbb-dtc-run.
   --hsbb-linux=<path>       Linux hsbb binary. Default: /private/tmp/hsbb-linux-amd64.
+  --copy=<host>:<container> Copy a host file/dir into the runner before executing. Repeatable.
   --build-hsbb              Build/rebuild Linux hsbb with the reusable builder container.
   --builder=<name>          Builder container name. Default: hsbb-pb-builder.
   --builder-image=<image>   Builder image. Default: programbench/eradman_1776_entr.8e2e8b4:task.
@@ -39,6 +40,7 @@ build_hsbb=0
 builder="${HSBB_PB_BUILDER:-hsbb-pb-builder}"
 builder_image="${HSBB_PB_BUILDER_IMAGE:-programbench/eradman_1776_entr.8e2e8b4:task}"
 keep_container=0
+copy_specs=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --out=*) host_out="${1#*=}" ;;
     --container-out=*) container_out="${1#*=}" ;;
     --hsbb-linux=*) hsbb_linux="${1#*=}" ;;
+    --copy=*) copy_specs+=("${1#*=}") ;;
     --build-hsbb) build_hsbb=1 ;;
     --builder=*) builder="${1#*=}" ;;
     --builder-image=*) builder_image="${1#*=}" ;;
@@ -183,6 +186,16 @@ log "starting runner $container from $image"
 docker run -d --platform linux/amd64 --name "$container" "$image" sleep infinity >/dev/null
 docker cp "$hsbb_linux" "$container:/usr/local/bin/hsbb"
 docker exec "$container" chmod +x /usr/local/bin/hsbb
+for copy_spec in "${copy_specs[@]}"; do
+  if [[ "$copy_spec" != *:* ]]; then
+    echo "--copy expects <host>:<container>, got: $copy_spec" >&2
+    exit 2
+  fi
+  host_path="${copy_spec%%:*}"
+  container_path="${copy_spec#*:}"
+  log "copying $host_path to $container:$container_path"
+  docker cp "$host_path" "$container:$container_path"
+done
 
 cat >"$host_out/runner.env" <<EOF
 task=$task
@@ -192,12 +205,13 @@ container=$container
 hsbb_linux=$hsbb_linux
 container_out=$container_out
 repo_root=$repo_root
+copy_specs=${copy_specs[*]-}
 EOF
 
 set +e
 if [[ "$mode" == "app" ]]; then
   log "running /workspace/executable $*"
-  docker exec "$container" /workspace/executable "$@" >"$host_out/stdout.txt" 2>"$host_out/stderr.txt"
+  docker exec "$container" env LANG=C.UTF-8 LC_ALL=C.UTF-8 /workspace/executable "$@" >"$host_out/stdout.txt" 2>"$host_out/stderr.txt"
   exit_code=$?
 else
   if [[ $# -eq 0 ]]; then
@@ -205,7 +219,7 @@ else
     exit 2
   fi
   log "running hsbb $*"
-  docker exec "$container" hsbb "$@" >"$host_out/stdout.txt" 2>"$host_out/stderr.txt"
+  docker exec "$container" env LANG=C.UTF-8 LC_ALL=C.UTF-8 hsbb "$@" >"$host_out/stdout.txt" 2>"$host_out/stderr.txt"
   exit_code=$?
 fi
 set -e

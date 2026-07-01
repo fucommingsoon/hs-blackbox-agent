@@ -97,6 +97,17 @@ scripts/pb-dtc-runner.sh \
   -- dtc run entr --app=/workspace/executable --out=/tmp/hsbb-dtc-run
 ```
 
+如果 `run-binding` 需要 host 上的 binding 文件，用 `--copy=host:container` 显式
+声明路径，不要临时手写 `docker cp`：
+
+```bash
+scripts/pb-dtc-runner.sh \
+  --task=ariga__atlas.6d81150 \
+  --copy=docs/pb/bindings/ariga__atlas.6d81150.json:/tmp/atlas-binding.json \
+  --out=/private/tmp/hsbb-pb-atlas-dtc \
+  -- dtc run-binding --binding=/tmp/atlas-binding.json --app=/workspace/executable --out=/tmp/hsbb-dtc-run
+```
+
 结果目录中固定包含：
 
 - `runner.env`
@@ -104,6 +115,10 @@ scripts/pb-dtc-runner.sh \
 - `stderr.txt`
 - `exit_code`
 - `container-out/`，仅当容器内 `--container-out` 路径存在时写出。
+
+当前 Codex 人工替代 LLM 抽取的 atlas binding 样例在
+`docs/pb/bindings/ariga__atlas.6d81150.json`。后续 DeepSeek 节点接入时，应
+产出同构 JSON，并通过 `dtc validate-binding` / `dtc plan-binding` 验证。
 
 ### 手工编译 Linux hsbb
 

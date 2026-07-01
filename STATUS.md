@@ -125,6 +125,9 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 - `dtc coverage entr` 当前为 `ReadinessHigh`，behavior/spec surfaces 均无缺口。
 - `dtc requirements WatcherCli` 会输出该 archetype 的必填/可选 binding 字段，供决策节点按清单回到源码/测试/help/grader 中抽取参数。
 - `dtc requirements HttpClientCli` 会输出 HTTP client CLI 的必填/可选 binding 字段，供 bat/httpie/curl 类任务抽取 URL、method、body/header item、form/raw/auth/download/print 等参数面。
+- `dtc requirements StructuredSubcommandCli` 会输出多子命令 CLI 的必填 binding
+  字段，供 atlas 这类任务抽取 help/version/license/completion/nested help、
+  formatter 文件输入、migration 文件生成等参数面。
 - `dtc validate-binding --binding=<file>` 会校验 LLM/Codex 产出的 binding JSON，并区分 `binding_ready` / `binding_missing` / `binding_ambiguous`。
 - `dtc system-prepare --corpus=<dir> [--results=<results.jsonl>] [--out=<file>]` 会生成 DeepSeek 系统包，包含 corpus chunks、signal lines、execution result chunks，以及 archetype decision / binding generation / result evaluation / oracle generation 四个强约束 prompt。
 - `dtc system-call --packet=<file> --stage=<stage> [--out=<file>]` 会读取 `DEEPSEEK_API_KEY` 并调用 DeepSeek OpenAI-compatible API；真实调用会外发 packet 内容，必须先确认数据边界。
@@ -149,10 +152,17 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
   - `/private/tmp/hsbb-pb-atlas-migrate-help`
   - `/private/tmp/hsbb-pb-atlas-schema-help`
   - `/private/tmp/hsbb-pb-atlas-completion-bash`
-- atlas 初步方向不是现有 `WatcherCli` / `HttpClientCli` 的直接套用，而更像
-  `StructuredSubcommandCli` + 文件系统副作用 flow：help/completion/version/license、
-  nested subcommand routing、config/env/var 继承、`migrate new/hash/validate`、
-  `schema fmt` 的文件生成和格式化。
+- atlas 初步方向不是现有 `WatcherCli` / `HttpClientCli` 的直接套用，而是
+  `StructuredSubcommandCli` + 文件系统副作用 flow。当前 Codex 人工替代 LLM
+  抽出的 binding 在 `docs/pb/bindings/ariga__atlas.6d81150.json`。
+- atlas 第一版 binding-driven 同容器 DTC 已跑通 `8/8 Pass`：
+  `help`、`version`、`license`、`completion bash`、`migrate --help`、
+  `schema --help`、`schema fmt` 文件原地格式化、`migrate new` 生成 migration
+  文件和 `atlas.sum`。结果：
+  - `/private/tmp/hsbb-pb-atlas-dtc-v2/container-out/atlas/20260701-074759-181939375000/results.jsonl`
+- atlas 还没有覆盖全量高难度面：config/env/var 继承、`migrate hash/validate`、
+  checksum 损坏路径、更多 schema/migration edge cases 都还需要继续抽到
+  `StructuredSubcommandCli` 或拆成新的文件状态 archetype。
 - 不再把 host `hsbb` + PB `docker exec` wrapper 当作标准执行方案。该模式会让
   `${WORK}` 文件和 `127.0.0.1` HTTP fixture 跨环境失真。
 
@@ -166,8 +176,9 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 4. 类 entr 任务不要复制 `entrPlan` step；先跑 `dtc requirements WatcherCli`，再新增一个 `WatcherCliSpec`，最后用 `watcherCliSteps` 生成流程。
 5. 做 generic runtime hardening：structured command，减少 shell quoting 依赖。
 6. 给 result 增加 artifact index，把 `${WORK}` 下的重要文件挂到 result。
-7. atlas 下一步先抽一个通用 `StructuredSubcommandCli`/文件副作用 archetype，
-   不要在 catalog 里硬堆 atlas 专属 step。
+7. atlas 下一步继续扩 `StructuredSubcommandCli`/文件状态 archetype：优先补
+   `migrate hash/validate`、config/env/var 继承和 checksum 错误路径，不要在
+   catalog 里硬堆 atlas 专属 step。
 
 ## 不要做
 

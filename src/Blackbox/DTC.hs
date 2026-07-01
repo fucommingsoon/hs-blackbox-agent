@@ -70,7 +70,7 @@ dtcFlowMermaid = mconcat
     , "    Corpus[Seed corpus<br/>source + upstream tests + grader] --> Read\n"
     , "    Read[Haskell readers<br/>source/test/grader adapters] --> Surface\n"
     , "    Surface[Behavior surfaces<br/>CLI flags / IO channels / fixtures / errors] --> Archetype\n"
-    , "    Archetype[Coarse archetype hypothesis<br/>watcher CLI / HTTP client CLI / formatter CLI] --> Requirements\n"
+    , "    Archetype[Coarse archetype hypothesis<br/>watcher CLI / HTTP client CLI / structured subcommand CLI] --> Requirements\n"
     , "    Requirements[Haskell archetype requirements<br/>required + optional binding fields] --> Calibrate\n"
     , "    Calibrate{DeepSeek/Codex binding extraction<br/>must cite corpus chunks} --> Plan\n"
     , "    Plan[DTC plan catalog<br/>archetype + project binding -> PlanStep] --> Review\n"

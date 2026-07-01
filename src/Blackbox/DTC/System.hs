@@ -459,7 +459,7 @@ requirementsForStage _ = []
 haskellRequirementsJson :: [ArchetypeRequirement]
 haskellRequirementsJson =
     [ requirement
-    | archetype <- [WatcherCli, HttpClientCli, FileInputCli, StdoutFormatterCli]
+    | archetype <- [WatcherCli, HttpClientCli, StructuredSubcommandCli, FileInputCli, StdoutFormatterCli]
     , Just requirement <- [requirementsByArchetype archetype]
     ]
 

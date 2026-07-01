@@ -1,0 +1,96 @@
+{
+  "archetype": "StructuredSubcommandCli",
+  "project": "ariga__atlas.6d81150",
+  "binding": {
+    "name": {
+      "value": "atlas",
+      "source": "task.yaml repository ariga/atlas and /workspace/executable --help",
+      "confidence": "high"
+    },
+    "successExitCode": {
+      "value": "0",
+      "source": "runner probes for --help, version, license, migrate --help, schema --help, completion bash",
+      "confidence": "high"
+    },
+    "usageNeedle": {
+      "value": "Usage:",
+      "source": "/private/tmp/hsbb-pb-atlas-help/stdout.txt",
+      "confidence": "high"
+    },
+    "topLevelNeedles": {
+      "value": "completion,license,migrate,schema,version",
+      "source": "/workspace/executable --help output",
+      "confidence": "high"
+    },
+    "nestedHelpCommands": {
+      "value": "migrate,schema",
+      "source": "grader nested help names plus migrate/schema --help probes",
+      "confidence": "high"
+    },
+    "completionCommand": {
+      "value": "completion bash",
+      "source": "eval.tests.test_subcommand_dispatch completion bash and manual probe",
+      "confidence": "high"
+    },
+    "completionNeedle": {
+      "value": "# bash completion",
+      "source": "/private/tmp/hsbb-pb-atlas-completion-bash/stdout.txt",
+      "confidence": "high"
+    },
+    "versionCommand": {
+      "value": "version",
+      "source": "eval.tests.test_atlas_cli.test_version_output and manual probe",
+      "confidence": "high"
+    },
+    "versionNeedle": {
+      "value": "atlas unofficial version",
+      "source": "/private/tmp/hsbb-pb-atlas-version/stdout.txt",
+      "confidence": "high"
+    },
+    "licenseCommand": {
+      "value": "license",
+      "source": "eval.tests.test_atlas_cli.test_license_output and manual probe",
+      "confidence": "high"
+    },
+    "licenseNeedle": {
+      "value": "LICENSE",
+      "source": "/private/tmp/hsbb-pb-atlas-license/stdout.txt",
+      "confidence": "high"
+    },
+    "formatInputPath": {
+      "value": "${WORK}/schema.hcl",
+      "source": "manual container probe for atlas schema fmt",
+      "confidence": "medium"
+    },
+    "formatInputText": {
+      "value": "schema \"users\"{\ncolumn \"id\"{type=int}\n}\n",
+      "source": "manual container probe for atlas schema fmt",
+      "confidence": "medium"
+    },
+    "formatCommand": {
+      "value": "schema fmt ${WORK}/schema.hcl",
+      "source": "manual container probe and eval.tests.test_schema_fmt names",
+      "confidence": "high"
+    },
+    "formatCheckNeedle": {
+      "value": "type = int",
+      "source": "manual container probe observed formatted file content",
+      "confidence": "high"
+    },
+    "migrationDirPath": {
+      "value": "${WORK}/migrations",
+      "source": "manual container probe for atlas migrate new",
+      "confidence": "medium"
+    },
+    "migrationNewCommand": {
+      "value": "migrate new --dir file://${WORK}/migrations create_users",
+      "source": "manual container probe and eval.tests.test_migrate_new names",
+      "confidence": "high"
+    },
+    "migrationFileNeedle": {
+      "value": "create_users",
+      "source": "manual container probe observed generated migration filename suffix",
+      "confidence": "high"
+    }
+  }
+}

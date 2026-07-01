@@ -10,6 +10,7 @@ import           Data.Text                            (Text)
 import           Text.Read                            (readMaybe)
 
 import           Blackbox.DTC.Archetype.HttpClientCli
+import           Blackbox.DTC.Archetype.StructuredSubcommandCli
 import           Blackbox.DTC.Binding
 import           Blackbox.DTC.Types
 
@@ -22,6 +23,12 @@ planFromBinding input
         httpClientPlanFromBinding input
     | biArchetype input == "http-client" =
         httpClientPlanFromBinding input
+    | biArchetype input == "StructuredSubcommandCli" =
+        structuredSubcommandPlanFromBinding input
+    | biArchetype input == "structured-subcommand-cli" =
+        structuredSubcommandPlanFromBinding input
+    | biArchetype input == "subcommand-cli" =
+        structuredSubcommandPlanFromBinding input
     | otherwise =
         Left ("unsupported binding archetype for plan generation: " <> biArchetype input)
 
@@ -59,6 +66,38 @@ httpClientPlanFromBinding input = do
         , dpInputs = bindingSources input
         , dpArchetypes = [HttpClientCli]
         , dpSteps = httpClientCliSteps spec
+        }
+
+
+structuredSubcommandPlanFromBinding :: BindingInput -> Either Text DtcPlan
+structuredSubcommandPlanFromBinding input = do
+    name <- field "name" input
+    successExitCode <- intField "successExitCode" input
+    spec <- StructuredSubcommandCliSpec
+        <$> pure name
+        <*> pure (bindingSources input)
+        <*> pure successExitCode
+        <*> field "usageNeedle" input
+        <*> listField "topLevelNeedles" input
+        <*> listField "nestedHelpCommands" input
+        <*> field "completionCommand" input
+        <*> field "completionNeedle" input
+        <*> field "versionCommand" input
+        <*> field "versionNeedle" input
+        <*> field "licenseCommand" input
+        <*> field "licenseNeedle" input
+        <*> fmap T.unpack (field "formatInputPath" input)
+        <*> field "formatInputText" input
+        <*> field "formatCommand" input
+        <*> field "formatCheckNeedle" input
+        <*> fmap T.unpack (field "migrationDirPath" input)
+        <*> field "migrationNewCommand" input
+        <*> field "migrationFileNeedle" input
+    pure DtcPlan
+        { dpName = name
+        , dpInputs = bindingSources input
+        , dpArchetypes = [StructuredSubcommandCli]
+        , dpSteps = structuredSubcommandCliSteps spec
         }
 
 

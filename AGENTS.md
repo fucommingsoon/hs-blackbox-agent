@@ -39,6 +39,7 @@ $BIN dtc plan bat
 $BIN dtc coverage entr
 $BIN dtc requirements WatcherCli
 $BIN dtc requirements HttpClientCli
+$BIN dtc requirements StructuredSubcommandCli
 $BIN dtc validate-binding --binding=<file>
 $BIN dtc plan-binding --binding=<file>
 $BIN dtc run-binding --binding=<file> --app=<binary> --out=out/dtc-runs
@@ -84,6 +85,21 @@ binding 生成后再切到同容器 DTC：
 scripts/pb-dtc-runner.sh --task=<task> -- \
   dtc run-binding --binding=/tmp/binding.json --app=/workspace/executable --out=/tmp/hsbb-dtc-run
 ```
+
+如果 binding 文件在 host，必须用 runner 的 `--copy=host:container` 显式复制：
+
+```bash
+scripts/pb-dtc-runner.sh \
+  --task=ariga__atlas.6d81150 \
+  --copy=docs/pb/bindings/ariga__atlas.6d81150.json:/tmp/atlas-binding.json \
+  --out=/private/tmp/hsbb-pb-atlas-dtc \
+  -- dtc run-binding --binding=/tmp/atlas-binding.json --app=/workspace/executable --out=/tmp/hsbb-dtc-run
+```
+
+`StructuredSubcommandCli` 当前由 atlas 首轮驱动，覆盖多子命令 CLI 的
+help/version/license/completion/nested help，以及 `schema fmt`、`migrate new`
+这类文件副作用。后续扩 atlas 时优先扩 archetype，不要把 atlas 专属 step
+堆到 catalog。
 
 类 entr 任务接入方式：
 

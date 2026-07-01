@@ -7,7 +7,7 @@ DTC 要分成两条流程看：
 
 当前实现以 Haskell DTC runtime 为执行核心。DeepSeek 不在 hot path 中逐步 probe，而是通过 `dtc system-prepare` 生成的机械读取包做系统层决策、执行结果评估和 oracle/report 提案。
 
-`hsbb` 本体是工具类工作流：负责执行 plan、隔离 workspace、触发事件、采集 stdout/stderr/exit/duration、做 Haskell verifier。`WatcherCli` / `HttpClientCli` 这类 archetype 是业务工作流库，entr/bat 是项目绑定。不要把三层混成一个大流程。
+`hsbb` 本体是工具类工作流：负责执行 plan、隔离 workspace、触发事件、采集 stdout/stderr/exit/duration、做 Haskell verifier。`WatcherCli` / `HttpClientCli` / `StructuredSubcommandCli` 这类 archetype 是业务工作流库，entr/bat/atlas 是项目绑定。不要把三层混成一个大流程。
 
 ## 构建流程
 
@@ -16,7 +16,7 @@ flowchart TD
     Corpus[Seed corpus<br/>source + upstream tests + grader] --> Read
     Read[Haskell readers<br/>source/test/grader adapters] --> Surface
     Surface[Behavior surfaces<br/>CLI flags / IO channels / fixtures / errors] --> Archetype
-    Archetype[Coarse archetype hypothesis<br/>watcher CLI / HTTP client CLI / formatter CLI] --> Requirements
+    Archetype[Coarse archetype hypothesis<br/>watcher CLI / HTTP client CLI / structured subcommand CLI] --> Requirements
     Requirements[Haskell archetype requirements<br/>required + optional binding fields] --> Calibrate
     Calibrate{DeepSeek/Codex binding extraction<br/>must cite corpus chunks} --> Plan
     Plan[DTC plan catalog<br/>archetype + project binding -> PlanStep] --> Review
@@ -52,6 +52,7 @@ flowchart TD
 - `hsbb dtc flow`
 - `hsbb dtc requirements WatcherCli`
 - `hsbb dtc requirements HttpClientCli`
+- `hsbb dtc requirements StructuredSubcommandCli`
 - `hsbb dtc plan-binding --binding=<file>`
 - `hsbb dtc run-binding --binding=<file> --app=<binary> [--out=<dir>]`
 - `hsbb dtc system-prepare --corpus=<dir> [--results=<results.jsonl>] [--out=<file>]`

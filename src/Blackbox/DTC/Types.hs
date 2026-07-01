@@ -58,6 +58,7 @@ instance A.ToJSON SpecSurface
 data Archetype
     = WatcherCli
     | HttpClientCli
+    | StructuredSubcommandCli
     | FileInputCli
     | StdoutFormatterCli
     deriving (Eq, Show, Generic)
