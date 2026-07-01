@@ -43,15 +43,15 @@
 
 - `entr`: 从 `system_test.sh` 抽 watcher CLI flow archetype。
 - `entr`: 从 grader 抽交互/状态/错误路径补充项。
-- `bat`: `HttpClientCli` requirements + reusable flow builder 已有；当前主流 11-step flow 已覆盖 method/query/header/json/form/raw/status/pretty。
-- `bat`: 用源码/grader 继续确认 URL shorthand、auth、download、print section、bench 行为，优先补到 archetype flow 或独立 reusable flow，不要继续堆 `batPlan` 单项目 step。
+- `bat`: `HttpClientCli` requirements + reusable flow builder 已有；当前主流 14-step flow 已覆盖 method/query/header/json/form/raw/status/pretty、response body print、basic auth、download file。
+- `bat`: 用源码/grader 继续确认 URL shorthand、proxy/TLS、bench、大文件/流式响应行为，优先补到 archetype flow 或独立 reusable flow，不要继续堆 `batPlan` 单项目 step。
 - PB 200+ 融合：继续挑选能暴露新 archetype 或现有 archetype 缺口的项目，不要
   以单项目得分为目标堆 step。
 - PB 任务选择必须从 `docs/pb/tasks.md` 出发，避免继续依赖仓库外历史清单。
 - `ariga__atlas.6d81150`: 第一版 `StructuredSubcommandCli` binding-driven flow
-  已跑通 8/8，覆盖 help/completion/version/license、nested help、`schema fmt`、
-  `migrate new`。下一步补 config/env/var 继承、`migrate hash/validate`、
-  checksum 损坏路径，不要直接堆 atlas 专属步骤。
+  已跑通 11/11，覆盖 help/completion/version/license、nested help、`schema fmt`、
+  `migrate new/hash/validate`、checksum mismatch。下一步补 config/env/var 继承
+  和更多 schema/migration edge cases，不要直接堆 atlas 专属步骤。
 
 ## 已完成 runtime 基础能力
 
@@ -73,7 +73,7 @@
 - 轻量本地 HTTP fixture 已有，支持 method/path/query/header/body needle 匹配和 `${PORT}` 插值。
 - continuous watcher evidence flow 已显式化：证据出现后 runtime 主动停止长驻进程，结果写出 `drrStopReason`。
 - PB 同容器真实执行已验证：Linux `hsbb` 注入 task container 后，`entr` 9/9
-  Pass，`bat` 11/11 Pass。执行细节见 `docs/pb/README.md`。
+  Pass，`bat` 14/14 Pass，`atlas` 11/11 Pass。执行细节见 `docs/pb/README.md`。
 - `scripts/pb-dtc-runner.sh` 已有，支持 `--mode=app` 首探
   `/workspace/executable`，以及默认 `hsbb` 模式执行同容器 DTC。
 - runner 已支持 `--copy=host:container`，用于把 binding JSON 等 host 材料显式

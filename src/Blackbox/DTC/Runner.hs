@@ -183,7 +183,9 @@ writeStdin env (Just h) input = do
 
 renderCmd :: DtcEnv -> FilePath -> Text -> String
 renderCmd env appPath cmd =
-    T.unpack (replaceAppPrefix (T.pack (shellQuote appPath)) (expandText env cmd))
+    T.unpack $
+        "APP=" <> T.pack (shellQuote appPath) <> "; "
+        <> replaceAppPrefix (T.pack (shellQuote appPath)) (expandText env cmd)
 
 
 replaceAppPrefix :: Text -> Text -> Text

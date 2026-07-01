@@ -32,6 +32,11 @@ data StructuredSubcommandCliSpec = StructuredSubcommandCliSpec
     , scsMigrationDirPath     :: FilePath
     , scsMigrationNewCommand  :: Text
     , scsMigrationFileNeedle  :: Text
+    , scsMigrationSqlFileName :: Text
+    , scsMigrationSqlText     :: Text
+    , scsMigrationHashCommand :: Text
+    , scsMigrationValidateCommand :: Text
+    , scsMigrationChecksumErrorNeedle :: Text
     } deriving (Eq, Show)
 
 
@@ -112,6 +117,26 @@ structuredSubcommandCliRequirements = ArchetypeRequirement
             "Substring expected in generated migration file names."
             ["grader migration-new assertions", "manual probe"]
             ["create_users"]
+        , required "migrationSqlFileName"
+            "Fixture migration SQL filename used by hash/validate flows."
+            ["grader migration hash/validate tests", "manual probe"]
+            ["20240101000000_create_users.sql"]
+        , required "migrationSqlText"
+            "Fixture migration SQL content used by hash/validate flows."
+            ["grader migration fixtures", "manual probe"]
+            ["CREATE TABLE users (id int);\\n"]
+        , required "migrationHashCommand"
+            "Command tail that writes or rewrites the migration checksum manifest. May reference ${WORK}."
+            ["grader migrate hash tests", "--help output", "manual probe"]
+            ["migrate hash --dir file://${WORK}/migrations"]
+        , required "migrationValidateCommand"
+            "Command tail that validates the migration directory checksum state. May reference ${WORK}."
+            ["grader migrate validate tests", "--help output", "manual probe"]
+            ["migrate validate --dir file://${WORK}/migrations"]
+        , required "migrationChecksumErrorNeedle"
+            "Stable substring expected when validation detects a checksum mismatch."
+            ["grader checksum error tests", "manual corrupt-file probe"]
+            ["checksum mismatch"]
         ]
     }
 
@@ -126,6 +151,9 @@ structuredSubcommandCliSteps spec =
     <> map (nestedHelpStep spec) (scsNestedHelpCommands spec)
     <> [ formatFileStep spec
        , migrationNewStep spec
+       , migrationHashStep spec
+       , migrationValidateStep spec
+       , migrationValidateCorruptStep spec
        ]
 
 
@@ -259,6 +287,103 @@ migrationNewStep spec =
         ]
         [ "Validates migration-style file generation and manifest creation with shell-level artifact checks until DTC gains native artifact expectations."
         ]
+
+
+migrationHashStep :: StructuredSubcommandCliSpec -> PlanStep
+migrationHashStep spec =
+    step spec "migration_hash" "file.migration_hash_manifest" SyncProbe
+        [ WriteFileText migrationFilePath (scsMigrationSqlText spec)
+        ]
+        [bs "file.input", bs "file.manifest", bs "cli.file_argument", bs "exit.code"]
+        [ss "fixture.file", ss "run.cmd", ss "expect.exit", ss "artifact.file"]
+        (RunSpec
+            (T.unwords
+                [ "app"
+                , scsMigrationHashCommand spec
+                , "&& test -f"
+                , T.pack (scsMigrationDirPath spec) <> "/atlas.sum"
+                , "&& grep -q"
+                , shellSingleQuote (scsMigrationSqlFileName spec)
+                , T.pack (scsMigrationDirPath spec) <> "/atlas.sum"
+                , "&& echo migration-hash-ok"
+                ]
+            )
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        []
+        [ ExpectExit (scsSuccessExitCode spec)
+        , ExpectStdoutContains "migration-hash-ok"
+        ]
+        [ "Validates checksum manifest generation for a pre-existing migration file."
+        ]
+  where
+    migrationFilePath = scsMigrationDirPath spec <> "/" <> T.unpack (scsMigrationSqlFileName spec)
+
+
+migrationValidateStep :: StructuredSubcommandCliSpec -> PlanStep
+migrationValidateStep spec =
+    step spec "migration_validate" "file.migration_validate_clean" SyncProbe
+        [ WriteFileText migrationFilePath (scsMigrationSqlText spec)
+        ]
+        [bs "file.input", bs "file.manifest", bs "file.checksum.validate", bs "exit.code"]
+        [ss "fixture.file", ss "run.cmd", ss "expect.exit", ss "artifact.file"]
+        (RunSpec
+            (T.unwords
+                [ "app"
+                , scsMigrationHashCommand spec
+                , "&& \"$APP\""
+                , scsMigrationValidateCommand spec
+                , "&& echo migration-validate-ok"
+                ]
+            )
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        []
+        [ ExpectExit (scsSuccessExitCode spec)
+        , ExpectStdoutContains "migration-validate-ok"
+        ]
+        [ "Validates clean migration checksum state after hashing."
+        ]
+  where
+    migrationFilePath = scsMigrationDirPath spec <> "/" <> T.unpack (scsMigrationSqlFileName spec)
+
+
+migrationValidateCorruptStep :: StructuredSubcommandCliSpec -> PlanStep
+migrationValidateCorruptStep spec =
+    step spec "migration_validate_corrupt" "file.migration_validate_corrupt" SyncProbe
+        [ WriteFileText migrationFilePath (scsMigrationSqlText spec)
+        ]
+        [bs "file.input", bs "file.manifest", bs "file.checksum.error", bs "exit.code"]
+        [ss "fixture.file", ss "run.cmd", ss "expect.exit", ss "expect.stderr"]
+        (RunSpec
+            (T.unwords
+                [ "app"
+                , scsMigrationHashCommand spec
+                , "&& printf '%s\\n' '-- hsbb-corrupt' >>"
+                , T.pack migrationFilePath
+                , "&& \"$APP\""
+                , scsMigrationValidateCommand spec
+                ]
+            )
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        []
+        [ ExpectExit 1
+        , ExpectStderrContains (scsMigrationChecksumErrorNeedle spec)
+        ]
+        [ "Validates corrupted migration checksum detection, which is a stateful error path rather than a shallow help probe."
+        ]
+  where
+    migrationFilePath = scsMigrationDirPath spec <> "/" <> T.unpack (scsMigrationSqlFileName spec)
 
 
 step

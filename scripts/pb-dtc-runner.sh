@@ -186,7 +186,7 @@ log "starting runner $container from $image"
 docker run -d --platform linux/amd64 --name "$container" "$image" sleep infinity >/dev/null
 docker cp "$hsbb_linux" "$container:/usr/local/bin/hsbb"
 docker exec "$container" chmod +x /usr/local/bin/hsbb
-for copy_spec in "${copy_specs[@]}"; do
+for copy_spec in "${copy_specs[@]+"${copy_specs[@]}"}"; do
   if [[ "$copy_spec" != *:* ]]; then
     echo "--copy expects <host>:<container>, got: $copy_spec" >&2
     exit 2

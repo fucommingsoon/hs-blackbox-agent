@@ -93,6 +93,13 @@ batHttpSpec = HttpClientCliSpec
     , hcsRawBodyValue = "{\"custom\":\"data\"}"
     , hcsRawBodyNeedles = ["custom", "data"]
     , hcsPrettyFalseFlag = "-pretty=false"
+    , hcsPrintResponseBodyFlag = Just "-print=b"
+    , hcsPrintResponseHeaderFlag = Nothing
+    , hcsAuthFlag = Just "-auth=user:pass"
+    , hcsAuthHeaderNeedle = Just "Authorization: Basic dXNlcjpwYXNz"
+    , hcsDownloadFlag = Just "-download=true"
+    , hcsDownloadFileName = Just "report.txt"
+    , hcsDownloadBodyNeedle = Just "download-ok"
     , hcsBasicResponseNeedle = "\"ok\""
     , hcsJsonResponseNeedle = "created"
     , hcsStatusErrorNeedle = "not_found"

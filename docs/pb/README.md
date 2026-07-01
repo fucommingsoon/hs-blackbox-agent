@@ -229,14 +229,23 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
   - 结果：`/private/tmp/hsbb-dtc-in-docker-entr/entr/20260701-061958-628670417000/results.jsonl`
   - 覆盖：参数错误、stdin watch list、缺失文件、空输入、子进程 stdout、
     子进程 exit code、文件变更 trigger、evidence-stop、`/_` 替换、目录变更。
-- `bat`: `11/11 Pass`
-  - 结果：`/private/tmp/hsbb-dtc-in-docker-bat/bat/20260701-062001-112626085000/results.jsonl`
+- `bat` 旧版主流 flow: `11/11 Pass`
+  - 旧结果：`/private/tmp/hsbb-dtc-in-docker-bat/bat/20260701-062001-112626085000/results.jsonl`
   - 覆盖：help、basic GET、default GET、default POST、query/header items、
     PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering。
+- `bat`: `14/14 Pass`
+  - 结果：`/private/tmp/hsbb-pb-bat-dtc-v3/container-out/bat/20260701-080127-528043513000/results.jsonl`
+  - 新增覆盖：response body print、basic auth、download file。response header
+    print 需要 TTY 才能稳定验证，当前 pipe capture 下不纳入 flow。
+- `atlas`: `11/11 Pass`
+  - 结果：`/private/tmp/hsbb-pb-atlas-dtc-v4/container-out/atlas/20260701-080142-505559548000/results.jsonl`
+  - 覆盖：help、version、license、completion、nested help、`schema fmt`、
+    `migrate new/hash/validate`、checksum mismatch。
 
-这两个结果支撑当前判断：`entr` / `bat` 两个 archetype seed 已经达到可支撑
-60-70% 等价行为实现复原的密度。这里说的是可观察业务行为和关键实现约束，
-不是逐行源码结构。
+这些结果支撑当前判断：DTC 同容器执行方案有效，且 `WatcherCli`、
+`HttpClientCli`、`StructuredSubcommandCli` 三类 archetype 方向成立。但这仍不
+自动等价于 60-70% 代码/行为复原；是否进入 reconstruction-ready，要看主流
+业务状态机、关键边缘路径、artifact evidence 和 source/grader 对齐度。
 
 ### Pass 语义边界
 
@@ -247,11 +256,15 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
   stdin watch list、文件变更触发、child stdout/exit code、oneshot、`/_`
   替换、目录变更。它已经比较接近日常使用中的主干 watcher 行为，但没有覆盖
   平台差异、性能、复杂 shell 组合、信号处理等所有真实使用面。
-- `bat 11/11 Pass` 能说明 HTTP client CLI archetype 的主流请求/响应面成立：
+- `bat 14/14 Pass` 能说明 HTTP client CLI archetype 的主流请求/响应面成立：
   help、GET/POST/PUT、query/header/json/form/raw body、non-2xx body、
-  pretty=false。它代表常见 HTTP 请求构造和输出渲染可用，但还不能代表完整
-  `bat` 使用：URL shorthand、auth、download、print sections、bench、TLS/代理、
-  大文件/流式响应等还未进入当前 flow。
+  pretty=false、response body print、basic auth、download file。它代表常见 HTTP
+  请求构造和输出渲染可用，但还不能代表完整 `bat` 使用：URL shorthand、
+  proxy/TLS、bench、大文件/流式响应等还未进入当前 flow。
+- `atlas 11/11 Pass` 能说明多子命令 CLI 和 migration 文件状态主干开始成立：
+  help/completion/version/license、nested help、format、new/hash/validate、
+  checksum mismatch。但它还不是 atlas 高难度任务的 reconstruction-ready：
+  config/env/var 继承、schema/migration 复杂边缘路径仍缺。
 
 因此 entr/bat 当前更准确的定位是“两个可复用 archetype seed 已被真实 reference
 executable 验证通过”。它们能证明 Haskell DTC 的方向和同容器执行方案有效，

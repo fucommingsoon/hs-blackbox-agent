@@ -70,21 +70,21 @@ $HSBB dtc run entr --app=<binary> --out=out/dtc-runs
 ## 当前 seed 判断
 
 - `entr`: 上游 `system_test.sh` 覆盖主行为面较强，已抽出 9 个 watcher CLI DTC flow，并用 corpus 内真实 `entr` binary 验证通过。
-- `bat`: 上游自带测试主要覆盖 `httplib`，CLI 主行为主要由 PB grader 暴露。当前已走 `requirements HttpClientCli -> validate-binding -> plan-binding -> run-binding`，跑通 11 个 seed flow：help、basic GET、default GET、default POST、GET query items、headers、PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering。
+- `bat`: 上游自带测试主要覆盖 `httplib`，CLI 主行为主要由 PB grader 暴露。当前已走 `requirements HttpClientCli -> validate-binding -> plan-binding -> run-binding`，跑通 14 个 seed flow：help、basic GET、default GET、default POST、GET query items、headers、PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering、response body print、basic auth、download file。
 - `atlas`: 高难度 PB 任务，当前由 Codex 人工替代 LLM 抽取
-  `StructuredSubcommandCli` binding，已在 PB task container 内跑通 8 个
+  `StructuredSubcommandCli` binding，已在 PB task container 内跑通 11 个
   binding-driven flow：help、version、license、completion、migrate/schema nested help、
-  `schema fmt`、`migrate new`。
+  `schema fmt`、`migrate new`、`migrate hash`、`migrate validate`、checksum mismatch。
 
 PB reference 环境标准执行方式是把 Linux 版 `hsbb` 注入 task container，与
 `/workspace/executable` 同容器运行。最近一次真实结果：`entr` 为 `9/9 Pass`，
-`bat` 为 `11/11 Pass`，`atlas` 第一版为 `8/8 Pass`。这比 host `hsbb` +
+`bat` 为 `14/14 Pass`，`atlas` 为 `11/11 Pass`。这比 host `hsbb` +
 `docker exec` wrapper 更可靠，因为 fixture、trigger 和黑盒共享同一个文件/网络视角。
 
 这些 Pass 的含义是“当前 DTC plan 覆盖的 behavior/spec surfaces 成立”，不是
 “项目完整正常使用”或“PB grader 全覆盖”。entr/bat 当前是可复用 archetype seed
 验证通过：entr 覆盖 watcher CLI 主干行为，bat 覆盖 HTTP client CLI 主流请求/响应
-行为；未进入 flow 的平台差异、边缘命令、auth/download/print/TLS/大文件等仍需继续
+行为；未进入 flow 的平台差异、边缘命令、URL shorthand、TLS/代理、大文件等仍需继续
 从 source/grader 中抽取。
 
 ## 架构边界

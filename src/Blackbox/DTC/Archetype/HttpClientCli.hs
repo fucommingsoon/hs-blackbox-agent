@@ -8,6 +8,7 @@ module Blackbox.DTC.Archetype.HttpClientCli
 
 import qualified Data.Text              as T
 import           Data.Text              (Text)
+import           Data.Maybe             (catMaybes)
 
 import           Blackbox.DTC.Types
 
@@ -33,6 +34,13 @@ data HttpClientCliSpec = HttpClientCliSpec
     , hcsRawBodyValue         :: Text
     , hcsRawBodyNeedles       :: [Text]
     , hcsPrettyFalseFlag      :: Text
+    , hcsPrintResponseBodyFlag :: Maybe Text
+    , hcsPrintResponseHeaderFlag :: Maybe Text
+    , hcsAuthFlag             :: Maybe Text
+    , hcsAuthHeaderNeedle     :: Maybe Text
+    , hcsDownloadFlag         :: Maybe Text
+    , hcsDownloadFileName     :: Maybe Text
+    , hcsDownloadBodyNeedle   :: Maybe Text
     , hcsBasicResponseNeedle  :: Text
     , hcsJsonResponseNeedle   :: Text
     , hcsStatusErrorNeedle    :: Text
@@ -152,14 +160,34 @@ httpClientCliRequirements = ArchetypeRequirement
             "Flag that selects which request/response sections are rendered."
             ["--help output", "README output section", "source print parser", "grader output tests"]
             ["-print=b", "-print=Hhb"]
+        , optional "printResponseBodyFlag"
+            "Concrete flag/value that renders only the response body when possible."
+            ["--help output", "README output section", "grader print/body tests"]
+            ["-print=b"]
+        , optional "printResponseHeaderFlag"
+            "Concrete flag/value that renders response headers."
+            ["--help output", "README output section", "grader print/header tests"]
+            ["-print=h"]
         , optional "authFlag"
             "Flag that supplies HTTP basic authentication material."
             ["--help output", "README authentication section", "source option parser", "grader auth tests"]
             ["-auth=user:pass", "-a user:pass"]
+        , optional "authHeaderNeedle"
+            "Substring the HTTP fixture should observe in request headers for the auth flow."
+            ["source auth parser", "grader auth tests", "chosen local fixture"]
+            ["Authorization: Basic dXNlcjpwYXNz"]
         , optional "downloadFlag"
             "Flag that switches response handling into download-to-file behavior."
             ["--help output", "README download examples", "source option parser", "grader download tests"]
             ["-download", "-d"]
+        , optional "downloadFileName"
+            "Expected filename created by the download flow from the response URL path."
+            ["source download behavior", "grader download tests", "chosen local fixture"]
+            ["report.txt"]
+        , optional "downloadBodyNeedle"
+            "Substring expected in the downloaded response file."
+            ["chosen local fixture", "grader download assertions"]
+            ["download-ok"]
         ]
     }
 
@@ -178,6 +206,14 @@ httpClientCliSteps spec =
     , statusBodyStep spec
     , prettyFalseStep spec
     ]
+    <> optionalSteps
+  where
+    optionalSteps = catMaybes
+        [ printResponseBodyStep spec <$> hcsPrintResponseBodyFlag spec
+        , printResponseHeaderStep spec <$> hcsPrintResponseHeaderFlag spec
+        , authBasicStep spec <$> hcsAuthFlag spec
+        , downloadStep spec <$> hcsDownloadFlag spec
+        ]
 
 
 helpStep :: HttpClientCliSpec -> PlanStep
@@ -450,6 +486,130 @@ prettyFalseStep spec =
         ]
         [ "Validates an output formatting control without making formatting logic part of the DTC runtime."
         ]
+
+
+printResponseBodyStep :: HttpClientCliSpec -> Text -> PlanStep
+printResponseBodyStep spec flag =
+    step spec "print_response_body" "http.output_print_response_body" FixtureProbe
+        [ StartHttpFixture
+            [ jsonRoute "GET" "/print-body" 200 "{\"print\":\"body\"}\n" [] [] []
+            ]
+        ]
+        [bs "http.request.get", bs "http.response.body", bs "stdout.print_control"]
+        [ss "fixture.http", ss "run.cmd", ss "trigger.http_ready", ss "expect.exit", ss "expect.stdout"]
+        (RunSpec
+            (T.unwords ["app", flag, hcsGetMethodToken spec, "http://127.0.0.1:${PORT}/print-body"])
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        [TriggerHttpReady]
+        [ ExpectExit (hcsSuccessExitCode spec)
+        , ExpectStdoutContains "print"
+        , ExpectStdoutContains "body"
+        ]
+        [ "Validates response-body print selection for HTTP client CLIs."
+        ]
+
+
+printResponseHeaderStep :: HttpClientCliSpec -> Text -> PlanStep
+printResponseHeaderStep spec flag =
+    step spec "print_response_header" "http.output_print_response_header" FixtureProbe
+        [ StartHttpFixture
+            [ jsonRoute "GET" "/print-header" 200 "{\"print\":\"header\"}\n" [] [] []
+            ]
+        ]
+        [bs "http.request.get", bs "http.response.headers", bs "stdout.print_control"]
+        [ss "fixture.http", ss "run.cmd", ss "trigger.http_ready", ss "expect.exit", ss "expect.stdout"]
+        (RunSpec
+            (T.unwords ["app", flag, hcsGetMethodToken spec, "http://127.0.0.1:${PORT}/print-header"])
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        [TriggerHttpReady]
+        [ ExpectExit (hcsSuccessExitCode spec)
+        , ExpectStdoutContains "Content-Type"
+        ]
+        [ "Validates response-header print selection for HTTP client CLIs."
+        ]
+
+
+authBasicStep :: HttpClientCliSpec -> Text -> PlanStep
+authBasicStep spec flag =
+    step spec "auth_basic" "http.auth_basic" FixtureProbe
+        [ StartHttpFixture
+            [ jsonRoute "GET" "/auth" 200 "{\"authenticated\":true}\n" [] [authNeedle] []
+            ]
+        ]
+        [bs "http.request.get", bs "http.request.auth.basic", bs "http.response.body"]
+        [ss "fixture.http", ss "run.cmd", ss "trigger.http_ready", ss "expect.exit", ss "expect.stdout"]
+        (RunSpec
+            (T.unwords ["app", flag, hcsGetMethodToken spec, "http://127.0.0.1:${PORT}/auth"])
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        [TriggerHttpReady]
+        [ ExpectExit (hcsSuccessExitCode spec)
+        , ExpectStdoutContains "authenticated"
+        ]
+        [ "Fixture verifies that basic auth material reaches the request header surface."
+        ]
+  where
+    authNeedle = maybe "Authorization: Basic dXNlcjpwYXNz" id (hcsAuthHeaderNeedle spec)
+
+
+downloadStep :: HttpClientCliSpec -> Text -> PlanStep
+downloadStep spec flag =
+    step spec "download_file" "http.download_file" FixtureProbe
+        [ StartHttpFixture
+            [ HttpRoute
+                { hrMethod = "GET"
+                , hrPath = "/" <> fileName
+                , hrStatus = 200
+                , hrBody = bodyNeedle <> "\n"
+                , hrResponseContentType = "text/plain"
+                , hrRequestPathNeedles = []
+                , hrRequestHeaderNeedles = []
+                , hrRequestBodyNeedles = []
+                }
+            ]
+        ]
+        [bs "http.request.get", bs "http.response.body", bs "file.download"]
+        [ss "fixture.http", ss "run.cmd", ss "trigger.http_ready", ss "expect.exit", ss "artifact.file"]
+        (RunSpec
+            (T.unwords
+                [ "cd ${WORK}"
+                , "&& \"$APP\""
+                , flag
+                , hcsGetMethodToken spec
+                , "http://127.0.0.1:${PORT}/" <> fileName
+                , "&& test -f"
+                , fileName
+                , "&& grep -q"
+                , shellSingleQuote bodyNeedle
+                , fileName
+                , "&& echo download-ok"
+                ]
+            )
+            Nothing
+            5000
+            RunSync
+            []
+        )
+        [TriggerHttpReady]
+        [ ExpectExit (hcsSuccessExitCode spec)
+        , ExpectStdoutContains "download-ok"
+        ]
+        [ "Validates download-to-file behavior inside the isolated step work directory."
+        ]
+  where
+    fileName = maybe "report.txt" id (hcsDownloadFileName spec)
+    bodyNeedle = maybe "download-ok" id (hcsDownloadBodyNeedle spec)
 
 
 jsonRoute :: Text -> Text -> Int -> Text -> [Text] -> [Text] -> [Text] -> HttpRoute

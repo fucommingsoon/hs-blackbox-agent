@@ -139,16 +139,16 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 - `dtc system-prepare --corpus=<dir> [--results=<results.jsonl>] [--out=<file>]` 会生成 DeepSeek 系统包，包含 corpus chunks、signal lines、execution result chunks，以及 archetype decision / binding generation / result evaluation / oracle generation 四个强约束 prompt。
 - `dtc system-call --packet=<file> --stage=<stage> [--out=<file>]` 会读取 `DEEPSEEK_API_KEY` 并调用 DeepSeek OpenAI-compatible API；真实调用会外发 packet 内容，必须先确认数据边界。
 - `dtc system-validate --packet=<file> --stage=<stage> --response=<file>` 会离线校验 DeepSeek 输出：阶段必填字段、是否引用已知 chunk/result id、是否出现未知 citation。
-- corpus 内真实 `bat` 可用 `go build -o bat .` 构建；当前已走 `requirements HttpClientCli -> validate-binding -> plan-binding -> run-binding`，通过 11 个 step：help、basic GET、default GET、default POST、GET query items、headers、PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering。
+- corpus 内真实 `bat` 可用 `go build -o bat .` 构建；当前已走 `requirements HttpClientCli -> validate-binding -> plan-binding -> run-binding`，通过 14 个 step：help、basic GET、default GET、default POST、GET query items、headers、PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering、response body print、basic auth、download file。
 - HTTP fixture 在当前沙箱下监听 `127.0.0.1` 需要 escalated 运行；这不是 hsbb 业务问题。
 - PB 真实 reference 环境验证：把 Linux `hsbb` 注入 PB task 容器，与
   `/workspace/executable` 同容器运行，`entr` 为 `9/9 Pass`，`bat` 为
-  `11/11 Pass`。结果分别导出到：
+  `14/14 Pass`。结果分别导出到：
   - `/private/tmp/hsbb-dtc-in-docker-entr/entr/20260701-061958-628670417000/results.jsonl`
-  - `/private/tmp/hsbb-dtc-in-docker-bat/bat/20260701-062001-112626085000/results.jsonl`
+  - `/private/tmp/hsbb-pb-bat-dtc-v3/container-out/bat/20260701-080127-528043513000/results.jsonl`
 - 这些 Pass 只表示当前 DTC plan 中的 expectation 成立，不表示项目完整正常
   使用，也不表示 PB grader 完整覆盖。`entr 9/9` 代表 watcher CLI 主干行为
-  已被 reference executable 验证；`bat 11/11` 代表 HTTP client CLI 主流请求/
+  已被 reference executable 验证；`bat 14/14` 代表 HTTP client CLI 主流请求/
   响应面已验证。未覆盖行为仍需继续从 source/grader 抽取。
 - PB 同容器 runner 已产品化为 `scripts/pb-dtc-runner.sh`。它会推断 task image、
   复用或重建 `/private/tmp/hsbb-linux-amd64`，创建一次性 task container，
@@ -166,14 +166,15 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 - atlas 初步方向不是现有 `WatcherCli` / `HttpClientCli` 的直接套用，而是
   `StructuredSubcommandCli` + 文件系统副作用 flow。当前 Codex 人工替代 LLM
   抽出的 binding 在 `docs/pb/bindings/ariga__atlas.6d81150.json`。
-- atlas 第一版 binding-driven 同容器 DTC 已跑通 `8/8 Pass`：
+- atlas binding-driven 同容器 DTC 已跑通 `11/11 Pass`：
   `help`、`version`、`license`、`completion bash`、`migrate --help`、
   `schema --help`、`schema fmt` 文件原地格式化、`migrate new` 生成 migration
-  文件和 `atlas.sum`。结果：
-  - `/private/tmp/hsbb-pb-atlas-dtc-v2/container-out/atlas/20260701-074759-181939375000/results.jsonl`
-- atlas 还没有覆盖全量高难度面：config/env/var 继承、`migrate hash/validate`、
-  checksum 损坏路径、更多 schema/migration edge cases 都还需要继续抽到
-  `StructuredSubcommandCli` 或拆成新的文件状态 archetype。
+  文件和 `atlas.sum`、`migrate hash`、`migrate validate`、checksum mismatch
+  错误路径。结果：
+  - `/private/tmp/hsbb-pb-atlas-dtc-v4/container-out/atlas/20260701-080142-505559548000/results.jsonl`
+- atlas 还没有覆盖全量高难度面：config/env/var 继承、更多 schema/migration
+  edge cases 都还需要继续抽到 `StructuredSubcommandCli` 或拆成新的文件状态
+  archetype。
 - 不再把 host `hsbb` + PB `docker exec` wrapper 当作标准执行方案。该模式会让
   `${WORK}` 文件和 `127.0.0.1` HTTP fixture 跨环境失真。
 
@@ -183,13 +184,13 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 
 1. 不要恢复旧 LLM loop。先保持 Haskell DTC 为执行和验证核心；DeepSeek 只能消费 `system-prepare` 的机械读取包做系统层决策/评估/oracle 提案。
 2. 继续加强 readiness gate 的判定粒度，避免只看 surface 名称导致虚高；特别是 HTTP request body/header/query 这类行为要有 fixture-side evidence。
-3. bat 下一步不要继续堆随机 grader case；优先补 request artifact index、URL shorthand、auth/download/print 这些还未进入当前 11-step 主流 flow 的行为面。
+3. bat 下一步不要继续堆随机 grader case；优先补 request artifact index、URL shorthand、proxy/TLS/large or streaming response 这些还未进入当前 14-step 主流 flow 的行为面。
 4. 类 entr 任务不要复制 `entrPlan` step；先跑 `dtc requirements WatcherCli`，再新增一个 `WatcherCliSpec`，最后用 `watcherCliSteps` 生成流程。
 5. 做 generic runtime hardening：structured command，减少 shell quoting 依赖。
 6. 给 result 增加 artifact index，把 `${WORK}` 下的重要文件挂到 result。
 7. atlas 下一步继续扩 `StructuredSubcommandCli`/文件状态 archetype：优先补
-   `migrate hash/validate`、config/env/var 继承和 checksum 错误路径，不要在
-   catalog 里硬堆 atlas 专属 step。
+   config/env/var 继承和更多 schema/migration edge cases，不要在 catalog 里硬堆
+   atlas 专属 step。
 
 ## 不要做
 

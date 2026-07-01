@@ -58,6 +58,13 @@ httpClientPlanFromBinding input = do
         <*> field "rawBodyValue" input
         <*> listField "rawBodyNeedles" input
         <*> field "prettyFalseFlag" input
+        <*> pure (optionalField "printResponseBodyFlag" input)
+        <*> pure (optionalField "printResponseHeaderFlag" input)
+        <*> pure (optionalField "authFlag" input)
+        <*> pure (optionalField "authHeaderNeedle" input)
+        <*> pure (optionalField "downloadFlag" input)
+        <*> pure (optionalField "downloadFileName" input)
+        <*> pure (optionalField "downloadBodyNeedle" input)
         <*> field "basicResponseNeedle" input
         <*> field "jsonResponseNeedle" input
         <*> field "statusErrorNeedle" input
@@ -93,6 +100,11 @@ structuredSubcommandPlanFromBinding input = do
         <*> fmap T.unpack (field "migrationDirPath" input)
         <*> field "migrationNewCommand" input
         <*> field "migrationFileNeedle" input
+        <*> field "migrationSqlFileName" input
+        <*> field "migrationSqlText" input
+        <*> field "migrationHashCommand" input
+        <*> field "migrationValidateCommand" input
+        <*> field "migrationChecksumErrorNeedle" input
     pure DtcPlan
         { dpName = name
         , dpInputs = bindingSources input
@@ -142,3 +154,12 @@ listField name input = do
 lookupValue :: Text -> BindingInput -> Maybe BindingValue
 lookupValue name input =
     find ((== name) . bvName) (biValues input)
+
+
+optionalField :: Text -> BindingInput -> Maybe Text
+optionalField name input =
+    case lookupValue name input of
+        Nothing -> Nothing
+        Just value
+            | T.null (T.strip (bvValue value)) -> Nothing
+            | otherwise -> Just (T.strip (bvValue value))

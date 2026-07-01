@@ -91,6 +91,31 @@
       "value": "create_users",
       "source": "manual container probe observed generated migration filename suffix",
       "confidence": "high"
+    },
+    "migrationSqlFileName": {
+      "value": "20240101000000_create_users.sql",
+      "source": "manual container probe for atlas migrate hash/validate",
+      "confidence": "high"
+    },
+    "migrationSqlText": {
+      "value": "CREATE TABLE users (id int);\n",
+      "source": "manual container probe for atlas migrate hash/validate",
+      "confidence": "medium"
+    },
+    "migrationHashCommand": {
+      "value": "migrate hash --dir file://${WORK}/migrations",
+      "source": "manual container probe and tests.json migrate hash references",
+      "confidence": "high"
+    },
+    "migrationValidateCommand": {
+      "value": "migrate validate --dir file://${WORK}/migrations",
+      "source": "manual container probe and tests.json migrate validate references",
+      "confidence": "high"
+    },
+    "migrationChecksumErrorNeedle": {
+      "value": "checksum mismatch",
+      "source": "manual corrupt-file probe stderr",
+      "confidence": "high"
     }
   }
 }
