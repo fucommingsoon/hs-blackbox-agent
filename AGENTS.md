@@ -2,8 +2,9 @@
 
 给 agent / 开发者的操作手册。不重复 README/FLOW 的架构描述，只补怎么干活。新窗口先读 `STATUS.md`，再读本文件。
 
-PB 200+ / 外部 800 融合和同容器执行方案见 `docs/pb/README.md`；不要从聊天记忆
-里恢复命令。
+PB 200+ / 外部 800 融合和同容器执行方案见 `docs/pb/README.md`；Codex
+临时代替 LLM 做 archetype decision / binding generation / result evaluation
+的机械清单见 `docs/pb/codex-llm-runbook.md`。不要从聊天记忆里恢复命令。
 
 ## 构建
 
@@ -46,6 +47,7 @@ $BIN dtc coverage entr
 $BIN dtc requirements WatcherCli
 $BIN dtc requirements HttpClientCli
 $BIN dtc requirements StructuredSubcommandCli
+$BIN dtc requirements TabularRenderCli
 $BIN dtc validate-binding --binding=<file>
 $BIN dtc plan-binding --binding=<file>
 $BIN dtc run-binding --binding=<file> --app=<binary> --out=out/dtc-runs
@@ -67,7 +69,7 @@ cd corpus/probe-plan-seeds/entr/source/github
 ./configure
 make
 cd /Users/kangxin/Documents/workspace/konceptosv18/hs-blackbox-agent
-$BIN dtc run entr --app=corpus/probe-plan-seeds/entr/source/github/entr --out=/private/tmp/hsbb-dtc-real-entr
+$BIN dtc run entr --app=corpus/probe-plan-seeds/entr/source/github/entr --out=out/dtc-runs/entr-real
 ```
 
 当前真实 entr run 应有 9 个 step，全部 `Pass`。其中 continuous watcher evidence flow 会在 stdout/stderr 证据出现后由 runtime 主动停止长驻进程，`drrStopReason` 应为 `EvidenceMatched`，`drrExit` 可为 `null`。
@@ -77,7 +79,8 @@ $BIN dtc run entr --app=corpus/probe-plan-seeds/entr/source/github/entr --out=/p
 PB reference 环境不要用 host `hsbb` 直接通过 `../pb28easy/<task>/probe` 跑 DTC
 作为标准结果。标准方案是把 Linux `hsbb` 放进 PB task container，与
 `/workspace/executable` 同容器执行；具体入口见 `scripts/pb-dtc-runner.sh` 和
-`docs/pb/README.md`。
+`docs/pb/README.md` 的“同容器执行方案”。容器内 `/tmp` / `${WORK}` 才参与
+执行互通；host `--out` 只是取证缓存。
 
 PB 新任务首探示例：
 
@@ -98,7 +101,7 @@ scripts/pb-dtc-runner.sh --task=<task> -- \
 scripts/pb-dtc-runner.sh \
   --task=ariga__atlas.6d81150 \
   --copy=docs/pb/bindings/ariga__atlas.6d81150.json:/tmp/atlas-binding.json \
-  --out=/private/tmp/hsbb-pb-atlas-dtc \
+  --out=<host-runner-out> \
   -- dtc run-binding --binding=/tmp/atlas-binding.json --app=/workspace/executable --out=/tmp/hsbb-dtc-run
 ```
 
@@ -125,6 +128,10 @@ help/version/license/completion/nested help，以及 `schema fmt`、`migrate new
 - `corpus/probe-plan-seeds/entr/grader`
 - `corpus/probe-plan-seeds/bat/source/github`
 - `corpus/probe-plan-seeds/bat/grader`
+- `corpus/probe-plan-seeds/atlas/source/github`
+- `corpus/probe-plan-seeds/atlas/grader`
+- `corpus/probe-plan-seeds/csview/source/github`
+- `corpus/probe-plan-seeds/csview/grader`
 
 只把源码和测试流程当 seed。`pb-metadata`、PB task README/SPEC、旧 distill 产物属于干扰项。
 

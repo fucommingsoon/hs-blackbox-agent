@@ -16,6 +16,12 @@ deterministic DTC primitives and system-layer packets such as
 - `bat/`
   - `grader/branches/<branch>/eval/`: raw ProgramBench pytest grader files.
   - `source/github/`: GitHub `astaxie/bat` snapshot at commit `17d1080`.
+- `atlas/`
+  - `grader/`: ProgramBench grader/test index and extracted grader material when available.
+  - `source/github/`: GitHub `ariga/atlas` snapshot at commit `6d81150`.
+- `csview/`
+  - `grader/tests.json`: ProgramBench metadata test index for `wfxr__csview.8ac4de0`.
+  - `source/github/`: GitHub `wfxr/csview` snapshot at commit `8ac4de0`.
 
 ## Why This Exists
 

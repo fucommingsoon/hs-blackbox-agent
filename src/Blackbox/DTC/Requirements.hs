@@ -9,6 +9,7 @@ import           Data.Text (Text)
 
 import           Blackbox.DTC.Archetype.HttpClientCli (httpClientCliRequirements)
 import           Blackbox.DTC.Archetype.StructuredSubcommandCli (structuredSubcommandCliRequirements)
+import           Blackbox.DTC.Archetype.TabularRenderCli (tabularRenderCliRequirements)
 import           Blackbox.DTC.Archetype.WatcherCli (watcherCliRequirements)
 import           Blackbox.DTC.Types
 
@@ -17,6 +18,7 @@ requirementsByArchetype :: Archetype -> Maybe ArchetypeRequirement
 requirementsByArchetype WatcherCli = Just watcherCliRequirements
 requirementsByArchetype HttpClientCli = Just httpClientCliRequirements
 requirementsByArchetype StructuredSubcommandCli = Just structuredSubcommandCliRequirements
+requirementsByArchetype TabularRenderCli = Just tabularRenderCliRequirements
 requirementsByArchetype FileInputCli = Nothing
 requirementsByArchetype StdoutFormatterCli = Nothing
 
@@ -31,4 +33,7 @@ archetypeRequirementByName "http-client" = requirementsByArchetype HttpClientCli
 archetypeRequirementByName "StructuredSubcommandCli" = requirementsByArchetype StructuredSubcommandCli
 archetypeRequirementByName "structured-subcommand-cli" = requirementsByArchetype StructuredSubcommandCli
 archetypeRequirementByName "subcommand-cli" = requirementsByArchetype StructuredSubcommandCli
+archetypeRequirementByName "TabularRenderCli" = requirementsByArchetype TabularRenderCli
+archetypeRequirementByName "tabular-render-cli" = requirementsByArchetype TabularRenderCli
+archetypeRequirementByName "table-render-cli" = requirementsByArchetype TabularRenderCli
 archetypeRequirementByName _ = Nothing

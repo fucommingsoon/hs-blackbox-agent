@@ -828,6 +828,11 @@ executable -V
 
 ### 10.1 Probe wrapper 边界
 
+本节记录的是早期 PB cleanroom/probe 规则，不是当前 Haskell DTC 的标准执行
+方案。当前 DTC 标准方案见 `docs/pb/README.md`：把 Linux `hsbb` 注入 PB task
+container，与 `/workspace/executable` 同容器执行；不要用 host probe wrapper
+来评估 fixture、trigger、HTTP fixture 等需要共享文件/网络视角的 flow。
+
 每个 PB 任务环境有 `./probe`，形如：
 
 ```bash

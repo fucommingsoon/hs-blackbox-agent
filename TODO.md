@@ -14,11 +14,15 @@
   5. `validate-binding` / `plan-binding` / 同容器 `run-binding`。
   6. 对照 source/grader/results 评估还原度，决定是扩 archetype、拆新 archetype，
      还是收敛去下一个任务。
+- Codex 临时代替 LLM 的机械执行清单维护在
+  `docs/pb/codex-llm-runbook.md`。新窗口不知道如何跑第四类任务类型或
+  binding-driven flow 时，先读该文件，不要从聊天记忆恢复命令。
 - 当前已有 seed：
   - `entr`: watcher CLI seed，9/9 Pass。
   - `bat`: HTTP client CLI seed，14/14 Pass。
   - `atlas`: structured subcommand CLI seed，source-audited 13/13 Pass，但仍不是
     hard task reconstruction-ready。
+  - `csview`: tabular render CLI seed，source-grounded generic 11/11 Pass。
 - 框架补丁必须由新任务暴露的共性缺口牵引。不要脱离新任务先做
   structured command、artifact index、readiness gate 等低痛感优化。
 
@@ -31,7 +35,7 @@
 - PB 同容器 runner 已有：`scripts/pb-dtc-runner.sh` 复用 Linux `hsbb`
   builder/cache，把 task image + `/workspace/executable` + `hsbb dtc ...`
   包成稳定入口；后续增强 artifact index 和 binding 分发。
-- 根据 `binding_ready` 的外部 binding 生成 project spec/plan 已有初版：`plan-binding` / `run-binding` 支持 `HttpClientCli`。
+- 根据 `binding_ready` 的外部 binding 生成 project spec/plan 已有初版：`plan-binding` / `run-binding` 支持 `HttpClientCli`、`StructuredSubcommandCli`、`TabularRenderCli`。
 - result 后续可补 artifact index，把 `${WORK}` 下的重要文件挂到 result。
 - LLM 系统层已有 DeepSeek API adapter 和输出校验器；后续补更细的 schema 校验、response pretty/JSONL 包格式、以及外发数据脱敏/裁剪策略。
 - `docs/pb/tasks.md` 已有 201 个 ProgramBench task 清单；后续可把 `unknown`
@@ -78,6 +82,12 @@
   config/env/var 驱动 schema inspect。version/license/completion 已改成
   optional 子流，避免污染下一个结构化 CLI。下一步补 config 错误路径和更多
   schema/migration edge cases，不要直接堆 atlas 专属步骤。
+- `wfxr__csview.8ac4de0`: source/grader 已补到 corpus，`TabularRenderCli`
+  requirements + binding-driven flow 已有；当前 generic 11/11 Pass，覆盖 help、
+  stdin CSV、file + delimiter/style、stdin TSV + markdown style、missing file、
+  version、no-header、sequence column、layout controls、wide characters、
+  malformed input error。下一步扩表格类时只能补跨项目共性面；太刻意或
+  csview-only 的流程要拒绝进 archetype。
 
 ## 已完成 runtime 基础能力
 
@@ -90,23 +100,28 @@
 - `hsbb dtc coverage <plan>` 已有。
 - `hsbb dtc requirements WatcherCli` 已有。
 - `hsbb dtc requirements HttpClientCli` 已有。
+- `hsbb dtc requirements StructuredSubcommandCli` 已有。
+- `hsbb dtc requirements TabularRenderCli` 已有。
 - `hsbb dtc validate-binding --binding=<file>` 已有。
-- `hsbb dtc plan-binding --binding=<file>` 已有，当前支持 `HttpClientCli`。
-- `hsbb dtc run-binding --binding=<file> --app=<binary>` 已有，当前支持 `HttpClientCli`。
+- `hsbb dtc plan-binding --binding=<file>` 已有，当前支持 `HttpClientCli`、`StructuredSubcommandCli`、`TabularRenderCli`。
+- `hsbb dtc run-binding --binding=<file> --app=<binary>` 已有，当前支持 `HttpClientCli`、`StructuredSubcommandCli`、`TabularRenderCli`。
 - `hsbb dtc system-prepare --corpus=<dir> [--results=<results.jsonl>] [--out=<file>]` 已有，生成 DeepSeek system packet：corpus chunks、signal lines、result chunks、四阶段 prompt。
 - `hsbb dtc system-call --packet=<file> --stage=<stage> [--out=<file>]` 已有，读取 `DEEPSEEK_API_KEY` 并调用 DeepSeek API。
 - `hsbb dtc system-validate --packet=<file> --stage=<stage> --response=<file>` 已有，可校验直接 JSON 或 DeepSeek API response wrapper。
 - 轻量本地 HTTP fixture 已有，支持 method/path/query/header/body needle 匹配和 `${PORT}` 插值。
 - continuous watcher evidence flow 已显式化：证据出现后 runtime 主动停止长驻进程，结果写出 `drrStopReason`。
 - PB 同容器真实执行已验证：Linux `hsbb` 注入 task container 后，`entr` 9/9
-  Pass，`bat` 14/14 Pass，`atlas` source-audited 13/13 Pass。执行细节见
-  `docs/pb/README.md`。
+  Pass，`bat` 14/14 Pass，`atlas` source-audited 13/13 Pass，`csview`
+  source-grounded generic 11/11 Pass。执行细节见
+  `docs/pb/README.md`，精简 result evidence 见 `docs/pb/results/`。
 - `scripts/pb-dtc-runner.sh` 已有，支持 `--mode=app` 首探
   `/workspace/executable`，以及默认 `hsbb` 模式执行同容器 DTC。
 - runner 已支持 `--copy=host:container`，用于把 binding JSON 等 host 材料显式
   放进 task container。
 - `StructuredSubcommandCli` 已有第一版 requirements + binding-driven plan builder；
   atlas 样例 binding 在 `docs/pb/bindings/ariga__atlas.6d81150.json`。
+- `TabularRenderCli` 已有第一版 requirements + binding-driven plan builder；
+  csview 样例 binding 在 `docs/pb/bindings/wfxr__csview.8ac4de0.json`。
 
 ## 已完成 entr seed flow
 

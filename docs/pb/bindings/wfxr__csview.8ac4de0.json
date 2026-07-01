@@ -1,0 +1,156 @@
+{
+  "archetype": "TabularRenderCli",
+  "project": "wfxr__csview.8ac4de0",
+  "binding": {
+    "name": {
+      "value": "csview",
+      "source": "task.yaml repository wfxr/csview and help output binary description",
+      "confidence": "high"
+    },
+    "successExitCode": {
+      "value": "0",
+      "source": "PB reference probes for --help, stdin CSV, TSV markdown, file delimiter/style",
+      "confidence": "high"
+    },
+    "usageNeedle": {
+      "value": "Usage: executable [OPTIONS] [FILE]",
+      "source": "/private/tmp/hsbb-pb-csview-help/stdout.txt and src/cli.rs clap parser",
+      "confidence": "high"
+    },
+    "csvStdinText": {
+      "value": "name,age\nAda,36\nBob,41\n",
+      "source": "manual PB reference probe stdin_default",
+      "confidence": "high"
+    },
+    "csvStdinNeedles": {
+      "value": "name,Ada,Bob",
+      "source": "/private/tmp/hsbb-pb-csview-probes/stdin_default.out",
+      "confidence": "high"
+    },
+    "fileInputPath": {
+      "value": "${WORK}/input.csv",
+      "source": "DTC isolated fixture path for file-input render flow",
+      "confidence": "high"
+    },
+    "fileInputText": {
+      "value": "a;b\n1;2\n",
+      "source": "manual PB reference probe file_delim_none",
+      "confidence": "high"
+    },
+    "fileRenderCommand": {
+      "value": "-d ';' -s none ${WORK}/input.csv",
+      "source": "src/cli.rs delimiter/style/file args and PB reference probe file_delim_none",
+      "confidence": "high"
+    },
+    "fileRenderNeedles": {
+      "value": "a  b,1  2",
+      "source": "/private/tmp/hsbb-pb-csview-probes/file_delim_none.out",
+      "confidence": "high"
+    },
+    "tsvStdinText": {
+      "value": "name\tage\nAda\t36\n",
+      "source": "manual PB reference probe tsv_markdown",
+      "confidence": "high"
+    },
+    "tsvRenderCommand": {
+      "value": "-t -s markdown",
+      "source": "src/cli.rs tsv/style flags and PB reference probe tsv_markdown",
+      "confidence": "high"
+    },
+    "tsvRenderNeedles": {
+      "value": "| name | age |,| Ada",
+      "source": "/private/tmp/hsbb-pb-csview-probes/tsv_markdown.out",
+      "confidence": "high"
+    },
+    "missingFileCommand": {
+      "value": "${WORK}/missing.csv",
+      "source": "manual PB reference probe missing_file",
+      "confidence": "high"
+    },
+    "missingFileErrorNeedle": {
+      "value": "No such file or directory",
+      "source": "/private/tmp/hsbb-pb-csview-probes/missing_file.err",
+      "confidence": "high"
+    },
+    "versionCommand": {
+      "value": "--version",
+      "source": "--help output lists -V, --version",
+      "confidence": "medium"
+    },
+    "versionNeedle": {
+      "value": "csview",
+      "source": "/private/tmp/hsbb-pb-csview-version/stdout.txt",
+      "confidence": "high"
+    },
+    "noHeaderCommand": {
+      "value": "-H -s ascii",
+      "source": "src/cli.rs no_headers/style args and /private/tmp/hsbb-pb-csview-depth-probes/no_headers_ascii.out",
+      "confidence": "high"
+    },
+    "noHeaderInputText": {
+      "value": "Ada,36\nBob,41\n",
+      "source": "generic two-row CSV fixture for first-row-as-data behavior",
+      "confidence": "high"
+    },
+    "noHeaderNeedles": {
+      "value": "| Ada | 36 |,| Bob | 41 |",
+      "source": "/private/tmp/hsbb-pb-csview-depth-probes/no_headers_ascii.out",
+      "confidence": "high"
+    },
+    "sequenceCommand": {
+      "value": "-n",
+      "source": "src/cli.rs number arg and /private/tmp/hsbb-pb-csview-depth-probes/number.out",
+      "confidence": "high"
+    },
+    "sequenceInputText": {
+      "value": "name,age\nAda,36\nBob,41\n",
+      "source": "generic CSV fixture with header and two body rows",
+      "confidence": "high"
+    },
+    "sequenceNeedles": {
+      "value": "│ 1 │ Ada,│ 2 │ Bob",
+      "source": "/private/tmp/hsbb-pb-csview-depth-probes/number.out",
+      "confidence": "high"
+    },
+    "layoutCommand": {
+      "value": "-p 0 -i 2 --header-align left --body-align right",
+      "source": "src/cli.rs layout args, util.rs style builder, and /private/tmp/hsbb-pb-csview-depth-probes/layout.out",
+      "confidence": "high"
+    },
+    "layoutInputText": {
+      "value": "a,b\n1,22\n",
+      "source": "generic short/wide cell fixture for padding, indentation, and alignment",
+      "confidence": "high"
+    },
+    "layoutNeedles": {
+      "value": "  ┌─┬──,│a│b,│1│22",
+      "source": "/private/tmp/hsbb-pb-csview-depth-probes/layout.out",
+      "confidence": "high"
+    },
+    "wideCharInputText": {
+      "value": "name,city,emoji\n李磊,四川省成都市,💍\n",
+      "source": "project description claims cjk/emoji support; src/table/printer.rs uses UnicodeWidthStr::width_cjk",
+      "confidence": "high"
+    },
+    "wideCharNeedles": {
+      "value": "李磊,四川省成都市,💍",
+      "source": "/private/tmp/hsbb-pb-csview-depth-probes/unicode.out",
+      "confidence": "high"
+    },
+    "malformedInputText": {
+      "value": "a,b\n1,2,3\n",
+      "source": "src/main.rs handles csv::ErrorKind::UnequalLengths and PB tests include unequal length cases",
+      "confidence": "high"
+    },
+    "malformedInputExitCode": {
+      "value": "1",
+      "source": "/private/tmp/hsbb-pb-csview-depth-probes/unequal.exit",
+      "confidence": "high"
+    },
+    "malformedInputStderrNeedle": {
+      "value": "found record with 3 fields",
+      "source": "/private/tmp/hsbb-pb-csview-depth-probes/unequal.err",
+      "confidence": "high"
+    }
+  }
+}

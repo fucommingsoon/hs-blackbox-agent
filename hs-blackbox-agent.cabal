@@ -25,6 +25,7 @@ library
     exposed-modules:  Blackbox.DTC
                       Blackbox.DTC.Archetype.HttpClientCli
                       Blackbox.DTC.Archetype.StructuredSubcommandCli
+                      Blackbox.DTC.Archetype.TabularRenderCli
                       Blackbox.DTC.Archetype.WatcherCli
                       Blackbox.DTC.Binding
                       Blackbox.DTC.Catalog

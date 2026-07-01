@@ -54,7 +54,7 @@ usage = unlines
     [ "usage:"
     , "  hsbb dtc plan <entr|bat>"
     , "  hsbb dtc coverage <entr|bat>"
-    , "  hsbb dtc requirements <WatcherCli|HttpClientCli|StructuredSubcommandCli>"
+    , "  hsbb dtc requirements <WatcherCli|HttpClientCli|StructuredSubcommandCli|TabularRenderCli>"
     , "  hsbb dtc validate-binding --binding=<file>"
     , "  hsbb dtc plan-binding --binding=<file>"
     , "  hsbb dtc run-binding --binding=<file> --app=<binary> [--out=<dir>]"

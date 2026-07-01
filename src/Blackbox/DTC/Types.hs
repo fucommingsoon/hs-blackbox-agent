@@ -59,6 +59,7 @@ data Archetype
     = WatcherCli
     | HttpClientCli
     | StructuredSubcommandCli
+    | TabularRenderCli
     | FileInputCli
     | StdoutFormatterCli
     deriving (Eq, Show, Generic)

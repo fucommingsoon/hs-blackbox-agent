@@ -23,6 +23,11 @@ hsbb dtc plan-binding --binding=<binding.json>
 hsbb dtc run-binding --binding=<binding.json> --app=<app> --out=<run-dir>
 ```
 
+当前没有真实 LLM 时，由 Codex 临时代替系统层 LLM 做 archetype decision、
+binding generation 和 result evaluation。具体命令清单见
+`codex-llm-runbook.md`；新窗口不知道怎么跑第四类 `TabularRenderCli` 或其他
+binding-driven flow 时，先读该文件。
+
 当前本地 ProgramBench metadata 中有 201 个 task，完整清单维护在
 `tasks.md`。不要再从旁边的历史 AFL 预测文档临时查任务数量；
 那些文档只作为历史评估参考。
@@ -78,6 +83,21 @@ timeout 6 docker exec -i pbref-real-<task> /workspace/executable "$@"
 runtime、黑盒共享同一个文件系统和网络视角；不要把 bridge 问题混进业务
 flow 评估。
 
+### 路径语义
+
+PB DTC 有三类路径，不能混用：
+
+- `container:/tmp/...`: 容器内临时路径，供 `hsbb`、binding 文件和 DTC output
+  使用。
+- `${WORK}`: DTC runtime 为每个 step 创建的隔离工作目录，fixture、trigger、
+  stdin/cmd 中的临时文件优先放这里。
+- `host --out`: runner 把 stdout/stderr/exit code/container output 拷回本机
+  后的取证缓存。
+
+只有前两类参与黑盒与 `hsbb` 的执行互通。host `--out` 或 `/private/tmp` 不能
+写进 binding、archetype flow 或黑盒参数；重要且小体积的 `results.jsonl`
+再复制到 `docs/pb/results/` 留存。
+
 ### 标准入口
 
 优先使用脚本，不要手工拼接 runner 容器命令：
@@ -92,8 +112,8 @@ scripts/pb-dtc-runner.sh --task=<owner__repo.commit> -- \
 
 - 按 `owner__repo.commit` 推断 image：
   `programbench/<owner>_1776_<repo>.<commit>:task`。
-- 复用 `/private/tmp/hsbb-linux-amd64`；缺失或传 `--build-hsbb` 时，复用
-  `hsbb-pb-builder` 编译 Linux amd64 版 `hsbb`。
+- 复用 host 侧缓存的 Linux amd64 `hsbb`；缺失或传 `--build-hsbb` 时，复用
+  `hsbb-pb-builder` 在 Linux 容器内编译。
 - 创建一次性 PB task container，注入 `hsbb`，运行 `/workspace/executable`
   或 `hsbb ...`，并把 stdout/stderr/exit code 和 DTC output 拷回 host。
 
@@ -103,7 +123,7 @@ scripts/pb-dtc-runner.sh --task=<owner__repo.commit> -- \
 scripts/pb-dtc-runner.sh --build-hsbb \
   --task=ariga__atlas.6d81150 \
   --mode=app \
-  --out=/private/tmp/hsbb-pb-atlas-help \
+  --out=<host-runner-out> \
   -- --help
 ```
 
@@ -112,7 +132,7 @@ scripts/pb-dtc-runner.sh --build-hsbb \
 ```bash
 scripts/pb-dtc-runner.sh \
   --task=eradman__entr.8e2e8b4 \
-  --out=/private/tmp/hsbb-pb-entr \
+  --out=<host-runner-out> \
   -- dtc run entr --app=/workspace/executable --out=/tmp/hsbb-dtc-run
 ```
 
@@ -123,7 +143,7 @@ scripts/pb-dtc-runner.sh \
 scripts/pb-dtc-runner.sh \
   --task=ariga__atlas.6d81150 \
   --copy=docs/pb/bindings/ariga__atlas.6d81150.json:/tmp/atlas-binding.json \
-  --out=/private/tmp/hsbb-pb-atlas-dtc \
+  --out=<host-runner-out> \
   -- dtc run-binding --binding=/tmp/atlas-binding.json --app=/workspace/executable --out=/tmp/hsbb-dtc-run
 ```
 
@@ -134,6 +154,8 @@ scripts/pb-dtc-runner.sh \
 - `stderr.txt`
 - `exit_code`
 - `container-out/`，仅当容器内 `--container-out` 路径存在时写出。
+
+不要把完整容器输出、构建产物或大 artifact 放进 `docs/pb/results/`。
 
 当前 Codex 人工替代 LLM 抽取的 atlas binding 样例在
 `docs/pb/bindings/ariga__atlas.6d81150.json`。后续 DeepSeek 节点接入时，应
@@ -189,7 +211,7 @@ docker exec hsbb-pb-builder sh -lc '
 
 docker cp \
   hsbb-pb-builder:/tmp/hsbb-src/dist-newstyle/build/x86_64-linux/ghc-9.6.7/hs-blackbox-agent-0.1.0.0/x/hsbb/build/hsbb/hsbb \
-  /private/tmp/hsbb-linux-amd64
+  <host-hsbb-linux-amd64>
 ```
 
 说明：
@@ -216,8 +238,8 @@ docker run -d --platform linux/amd64 \
   programbench/astaxie_1776_bat.17d1080:task \
   sleep infinity
 
-docker cp /private/tmp/hsbb-linux-amd64 hsbb-pb-entr-runner:/usr/local/bin/hsbb
-docker cp /private/tmp/hsbb-linux-amd64 hsbb-pb-bat-runner:/usr/local/bin/hsbb
+docker cp <host-hsbb-linux-amd64> hsbb-pb-entr-runner:/usr/local/bin/hsbb
+docker cp <host-hsbb-linux-amd64> hsbb-pb-bat-runner:/usr/local/bin/hsbb
 docker exec hsbb-pb-entr-runner chmod +x /usr/local/bin/hsbb
 docker exec hsbb-pb-bat-runner chmod +x /usr/local/bin/hsbb
 
@@ -227,8 +249,8 @@ docker exec hsbb-pb-entr-runner sh -lc \
 docker exec hsbb-pb-bat-runner sh -lc \
   'hsbb dtc run bat --app=/workspace/executable --out=/tmp/hsbb-dtc-bat'
 
-docker cp hsbb-pb-entr-runner:/tmp/hsbb-dtc-entr /private/tmp/hsbb-dtc-in-docker-entr
-docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-bat
+docker cp hsbb-pb-entr-runner:/tmp/hsbb-dtc-entr <host-entr-result-out>
+docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat <host-bat-result-out>
 ```
 
 ## 已验证结果
@@ -236,22 +258,20 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
 最近一次同容器真实运行结果：
 
 - `entr`: `9/9 Pass`
-  - 结果：`/private/tmp/hsbb-dtc-in-docker-entr/entr/20260701-061958-628670417000/results.jsonl`
+  - 精简结果：`docs/pb/results/entr-20260701-061958-results.jsonl`
   - 覆盖：参数错误、stdin watch list、缺失文件、空输入、子进程 stdout、
     子进程 exit code、文件变更 trigger、evidence-stop、`/_` 替换、目录变更。
 - `bat` 旧版主流 flow: `11/11 Pass`
-  - 旧结果：`/private/tmp/hsbb-dtc-in-docker-bat/bat/20260701-062001-112626085000/results.jsonl`
+  - 旧结果只保留为历史调试结论，不作为当前复跑依据。
   - 覆盖：help、basic GET、default GET、default POST、query/header items、
     PUT JSON items、form body、raw body、non-2xx body、pretty=false JSON rendering。
 - `bat`: `14/14 Pass`
-  - 结果：`/private/tmp/hsbb-pb-bat-dtc-v3/container-out/bat/20260701-080127-528043513000/results.jsonl`
+  - 精简结果：`docs/pb/results/bat-20260701-080127-results.jsonl`
   - 新增覆盖：response body print、basic auth、download file。response header
     print 需要 TTY 才能稳定验证，当前 pipe capture 下不纳入 flow。
 - `atlas`: source-audited `13/13 Pass`
-  - 最新结果：`/private/tmp/hsbb-pb-atlas-dtc-structured-audit/container-out/atlas/20260701-083041-788100297000/results.jsonl`
-  - 旧 source-audited 12-step 结果：`/private/tmp/hsbb-pb-atlas-dtc-config-env-var/container-out/atlas/20260701-082403-737927710000/results.jsonl`
-  - 旧 source-audited 11-step 结果：`/private/tmp/hsbb-pb-atlas-dtc-source-audit/container-out/atlas/20260701-080917-987701050000/results.jsonl`
-  - 旧 provisional 结果：`/private/tmp/hsbb-pb-atlas-dtc-v4/container-out/atlas/20260701-080142-505559548000/results.jsonl`
+  - 精简结果：`docs/pb/results/atlas-20260701-083041-results.jsonl`
+  - 旧 source-audited/provisional host out 只作为历史调试结论，不作为当前复跑依据。
   - 覆盖：help、no-args usage、version、license、completion、nested help、`schema fmt`、
     `migrate new/hash/validate`、checksum mismatch、`--config/--env/--var`
     配置驱动 schema inspect。
@@ -260,6 +280,9 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
 `HttpClientCli`、`StructuredSubcommandCli` 三类 archetype 方向成立。但这仍不
 自动等价于 60-70% 代码/行为复原；是否进入 reconstruction-ready，要看主流
 业务状态机、关键边缘路径、artifact evidence 和 source/grader 对齐度。
+
+上述 seed 的精简 result evidence 已保存到 `docs/pb/results/`，可用于新窗口
+复核 step verdict、behavior/spec surfaces 和 result shape。
 
 ### Pass 语义边界
 
@@ -297,11 +320,15 @@ Pass 数量和 behavior/spec surface 覆盖、grader/source 对照、artifact ev
    的项目，不要只挑容易加分的单点。
 2. 每个新项目先判断 coarse archetype，再跑 `requirements` 让 Haskell 给出
    binding 字段需求。
-3. LLM/Codex 只能根据 `system-prepare` 的机械读取包生成 binding/评估结果，
+3. Codex 替代 LLM 的执行顺序固定在 `codex-llm-runbook.md`。包括第四类
+   `TabularRenderCli` 在内，必须先取齐 source/grader/results，再走
+   `requirements -> binding -> validate-binding -> plan-binding -> 同容器
+   run-binding`。
+4. LLM/Codex 只能根据 `system-prepare` 的机械读取包生成 binding/评估结果，
    不能凭空猜参数。
-4. 对 binding 缺失字段，优先回到 source/grader/results 增补证据；不要用
+5. 对 binding 缺失字段，优先回到 source/grader/results 增补证据；不要用
    旧 confidence/oracle loop。
-5. 当一个项目暴露出可复用行为面，优先扩 `Archetype.*` flow builder；项目
+6. 当一个项目暴露出可复用行为面，优先扩 `Archetype.*` flow builder；项目
    catalog 只填差异绑定。
-6. `bat` 类 HTTP client 下一步应补 request artifact index，让结果文件能复盘
+7. `bat` 类 HTTP client 下一步应补 request artifact index，让结果文件能复盘
    fixture 实际收到的 path/header/body。

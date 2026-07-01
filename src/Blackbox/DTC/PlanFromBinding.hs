@@ -11,6 +11,7 @@ import           Text.Read                            (readMaybe)
 
 import           Blackbox.DTC.Archetype.HttpClientCli
 import           Blackbox.DTC.Archetype.StructuredSubcommandCli
+import           Blackbox.DTC.Archetype.TabularRenderCli
 import           Blackbox.DTC.Binding
 import           Blackbox.DTC.Types
 
@@ -29,6 +30,12 @@ planFromBinding input
         structuredSubcommandPlanFromBinding input
     | biArchetype input == "subcommand-cli" =
         structuredSubcommandPlanFromBinding input
+    | biArchetype input == "TabularRenderCli" =
+        tabularRenderPlanFromBinding input
+    | biArchetype input == "tabular-render-cli" =
+        tabularRenderPlanFromBinding input
+    | biArchetype input == "table-render-cli" =
+        tabularRenderPlanFromBinding input
     | otherwise =
         Left ("unsupported binding archetype for plan generation: " <> biArchetype input)
 
@@ -152,6 +159,99 @@ structuredConfigEnvVar input =
     present = [name | name <- names, lookupValue name input /= Nothing]
 
 
+tabularRenderPlanFromBinding :: BindingInput -> Either Text DtcPlan
+tabularRenderPlanFromBinding input = do
+    name <- field "name" input
+    successExitCode <- intField "successExitCode" input
+    version <- optionalPair "versionCommand" "versionNeedle" input
+    noHeader <- optionalStdinRender "noHeaderCommand" "noHeaderInputText" "noHeaderNeedles" input
+    sequenceRender <- optionalStdinRender "sequenceCommand" "sequenceInputText" "sequenceNeedles" input
+    layout <- optionalStdinRender "layoutCommand" "layoutInputText" "layoutNeedles" input
+    wideChar <- optionalStdinRender "wideCharCommand" "wideCharInputText" "wideCharNeedles" input
+    malformed <- optionalErrorRender
+        "malformedInputCommand"
+        "malformedInputText"
+        "malformedInputExitCode"
+        "malformedInputStderrNeedle"
+        input
+    spec <- TabularRenderCliSpec
+        <$> pure name
+        <*> pure (bindingSources input)
+        <*> pure successExitCode
+        <*> field "usageNeedle" input
+        <*> field "csvStdinText" input
+        <*> listField "csvStdinNeedles" input
+        <*> fmap T.unpack (field "fileInputPath" input)
+        <*> field "fileInputText" input
+        <*> field "fileRenderCommand" input
+        <*> listField "fileRenderNeedles" input
+        <*> field "tsvStdinText" input
+        <*> field "tsvRenderCommand" input
+        <*> listField "tsvRenderNeedles" input
+        <*> field "missingFileCommand" input
+        <*> field "missingFileErrorNeedle" input
+        <*> pure (fst version)
+        <*> pure (snd version)
+        <*> pure noHeader
+        <*> pure sequenceRender
+        <*> pure layout
+        <*> pure wideChar
+        <*> pure malformed
+    pure DtcPlan
+        { dpName = name
+        , dpInputs = bindingSources input
+        , dpArchetypes = [TabularRenderCli]
+        , dpSteps = tabularRenderCliSteps spec
+        }
+
+
+optionalPair :: Text -> Text -> BindingInput -> Either Text (Maybe Text, Maybe Text)
+optionalPair left right input =
+    case (optionalField left input, optionalField right input) of
+        (Nothing, Nothing) -> Right (Nothing, Nothing)
+        (Just a, Just b)   -> Right (Just a, Just b)
+        _ -> Left ("binding requires both optional fields or neither: " <> left <> "," <> right)
+
+
+optionalStdinRender :: Text -> Text -> Text -> BindingInput -> Either Text (Maybe StdinRenderSpec)
+optionalStdinRender commandName inputName needlesName input =
+    case (optionalField inputName input, optionalField needlesName input) of
+        (Nothing, Nothing)
+            | lookupValue commandName input == Nothing -> Right Nothing
+            | otherwise -> Left ("tabular stdin render binding requires input and needles when command is present: " <> commandName <> "," <> inputName <> "," <> needlesName)
+        (Just inputText, Just needlesText) ->
+            Right (Just StdinRenderSpec
+                { srsCommand = maybe "" id (optionalField commandName input)
+                , srsInput = inputText
+                , srsNeedles = splitList needlesText
+                })
+        _ -> Left ("tabular stdin render binding requires input and needles together: " <> inputName <> "," <> needlesName)
+
+
+optionalErrorRender :: Text -> Text -> Text -> Text -> BindingInput -> Either Text (Maybe ErrorRenderSpec)
+optionalErrorRender commandName inputName exitName stderrName input =
+    case present of
+        []
+            | lookupValue commandName input == Nothing -> Right Nothing
+            | otherwise -> Left ("tabular malformed-input binding requires input, exit code, and stderr needle when command is present: " <> commandName)
+        fields
+            | length fields == length requiredNames -> do
+                inputText <- field inputName input
+                exitCode <- intField exitName input
+                stderrNeedle <- field stderrName input
+                Right (Just ErrorRenderSpec
+                    { ersCommand = maybe "" id (optionalField commandName input)
+                    , ersInput = inputText
+                    , ersExitCode = exitCode
+                    , ersStderrNeedle = stderrNeedle
+                    })
+            | otherwise ->
+                Left ("tabular malformed-input binding requires all required optional fields when any are present: " <> T.intercalate "," requiredNames)
+  where
+    requiredNames = [inputName, exitName, stderrName]
+    present = [name | name <- requiredNames, lookupValue name input /= Nothing]
+
+
 bindingSources :: BindingInput -> [CorpusInput]
 bindingSources input =
     [ SourceTree ("binding:" <> T.unpack name) ]
@@ -181,13 +281,19 @@ intField name input = do
 listField :: Text -> BindingInput -> Either Text [Text]
 listField name input = do
     value <- field name input
-    let parts
-            | "," `T.isInfixOf` value = T.splitOn "," value
-            | otherwise               = T.words value
-        cleaned = filter (not . T.null) (map T.strip parts)
+    let cleaned = splitList value
     if null cleaned
         then Left ("binding list field is empty: " <> name)
         else Right cleaned
+
+
+splitList :: Text -> [Text]
+splitList value =
+    filter (not . T.null) (map T.strip parts)
+  where
+    parts
+        | "," `T.isInfixOf` value = T.splitOn "," value
+        | otherwise               = T.words value
 
 
 lookupValue :: Text -> BindingInput -> Maybe BindingValue
