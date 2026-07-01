@@ -1,6 +1,6 @@
 # PB Integration Runbook
 
-本文件给新窗口 Codex / 开发者快速恢复 PB 200+ 任务融合工作。先读
+本文件给新窗口 Codex / 开发者快速恢复 PB 200+ 任务融合工作。先读根目录
 `STATUS.md`，再读本文件。
 
 ## 目标范围
@@ -24,7 +24,7 @@ hsbb dtc run-binding --binding=<binding.json> --app=<app> --out=<run-dir>
 ```
 
 当前本地 ProgramBench metadata 中有 201 个 task，完整清单维护在
-`PB_TASK_INVENTORY.md`。不要再从旁边的历史 AFL 预测文档临时查任务数量；
+`tasks.md`。不要再从旁边的历史 AFL 预测文档临时查任务数量；
 那些文档只作为历史评估参考。
 
 ## 任务材料边界
@@ -159,7 +159,7 @@ docker cp hsbb-pb-bat-runner:/tmp/hsbb-dtc-bat /private/tmp/hsbb-dtc-in-docker-b
 
 ## 下一步融合策略
 
-1. 继续选 PB 任务时，先看 `PB_TASK_INVENTORY.md`，再优先选能代表新 archetype
+1. 继续选 PB 任务时，先看 `tasks.md`，再优先选能代表新 archetype
    或能补齐现有 archetype 缺口
    的项目，不要只挑容易加分的单点。
 2. 每个新项目先判断 coarse archetype，再跑 `requirements` 让 Haskell 给出

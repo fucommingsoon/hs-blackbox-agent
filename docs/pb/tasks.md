@@ -21,7 +21,7 @@ Canonical local ProgramBench task inventory for DTC fusion. This file is generat
 Notes:
 
 - `unknown` means the current `task.yaml` has no `difficulty` field. Do not drop these tasks; classify them before PB-wide planning.
-- Older notes such as `../haskell_test_pb/pb_full_afl_prediction.md` cover 163 tasks and are historical AFL ROI estimates, not the full inventory.
+- Older workspace notes such as `../haskell_test_pb/pb_full_afl_prediction.md` cover 163 tasks and are historical AFL ROI estimates, not the full inventory.
 - `test_count` is the sum of listed pytest node ids across all branches in `tests.json`; it is a scale signal, not a DTC coverage score.
 
 ## Hard Tasks (18)

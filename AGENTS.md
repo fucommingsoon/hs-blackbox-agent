@@ -2,7 +2,7 @@
 
 给 agent / 开发者的操作手册。不重复 README/FLOW 的架构描述，只补怎么干活。新窗口先读 `STATUS.md`，再读本文件。
 
-PB 200+ / 外部 800 融合和同容器执行方案见 `PB_INTEGRATION.md`；不要从聊天记忆
+PB 200+ / 外部 800 融合和同容器执行方案见 `docs/pb/README.md`；不要从聊天记忆
 里恢复命令。
 
 ## 构建
@@ -69,7 +69,7 @@ $BIN dtc run entr --app=corpus/probe-plan-seeds/entr/source/github/entr --out=/p
 
 PB reference 环境不要用 host `hsbb` 直接通过 `../pb28easy/<task>/probe` 跑 DTC
 作为标准结果。标准方案是把 Linux `hsbb` 放进 PB task container，与
-`/workspace/executable` 同容器执行；具体命令见 `PB_INTEGRATION.md`。
+`/workspace/executable` 同容器执行；具体命令见 `docs/pb/README.md`。
 
 类 entr 任务接入方式：
 

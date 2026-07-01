@@ -12,7 +12,7 @@
 - 根据 `binding_ready` 的外部 binding 生成 project spec/plan 已有初版：`plan-binding` / `run-binding` 支持 `HttpClientCli`。
 - result 后续可补 artifact index，把 `${WORK}` 下的重要文件挂到 result。
 - LLM 系统层已有 DeepSeek API adapter 和输出校验器；后续补更细的 schema 校验、response pretty/JSONL 包格式、以及外发数据脱敏/裁剪策略。
-- `PB_TASK_INVENTORY.md` 已有 201 个 ProgramBench task 清单；后续要把 `unknown`
+- `docs/pb/tasks.md` 已有 201 个 ProgramBench task 清单；后续要把 `unknown`
   difficulty 的 35 个任务做难度归类或单独分桶。
 
 ## P1 - DTC runtime components
@@ -47,7 +47,7 @@
 - `bat`: 用源码/grader 继续确认 URL shorthand、auth、download、print section、bench 行为，优先补到 archetype flow 或独立 reusable flow，不要继续堆 `batPlan` 单项目 step。
 - PB 200+ 融合：继续挑选能暴露新 archetype 或现有 archetype 缺口的项目，不要
   以单项目得分为目标堆 step。
-- PB 任务选择必须从 `PB_TASK_INVENTORY.md` 出发，避免继续依赖仓库外历史清单。
+- PB 任务选择必须从 `docs/pb/tasks.md` 出发，避免继续依赖仓库外历史清单。
 
 ## 已完成 runtime 基础能力
 
@@ -69,7 +69,7 @@
 - 轻量本地 HTTP fixture 已有，支持 method/path/query/header/body needle 匹配和 `${PORT}` 插值。
 - continuous watcher evidence flow 已显式化：证据出现后 runtime 主动停止长驻进程，结果写出 `drrStopReason`。
 - PB 同容器真实执行已验证：Linux `hsbb` 注入 task container 后，`entr` 9/9
-  Pass，`bat` 11/11 Pass。执行细节见 `PB_INTEGRATION.md`。
+  Pass，`bat` 11/11 Pass。执行细节见 `docs/pb/README.md`。
 
 ## 已完成 entr seed flow
 

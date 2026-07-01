@@ -64,7 +64,7 @@ Runtime 当前支持每步隔离 `${WORK}`、可选 result JSONL 落盘、文件
 PB reference task 的标准执行拓扑是：`hsbb` 与 `/workspace/executable` 位于同一个
 task container。host `hsbb` 通过 `docker exec` wrapper 调用黑盒会造成 `${WORK}`
 文件不可见、`127.0.0.1` fixture 不可达等失真；这不是业务流程结果。详见
-`PB_INTEGRATION.md`。
+`docs/pb/README.md`。
 
 `system-prepare` 当前负责 LLM 前置机械化：递归读取 corpus 文本文件、切 chunk、提取 signal lines、读取可选 `results.jsonl`，并生成 DeepSeek 的 `archetype_decision` / `binding_generation` / `result_evaluation` / `oracle_generation` 四阶段 prompt。LLM 输出必须引用 chunk id 或 result chunk id；证据缺失时应返回 `missing_or_ambiguous`。
 

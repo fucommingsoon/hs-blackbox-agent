@@ -45,7 +45,7 @@ cache, narrowed to only each branch's `eval/` directory.
 For DTC execution, do not treat the host-side `probe` wrapper as the standard
 environment. The reliable PB path is to put Linux `hsbb` inside the task
 container and run `/workspace/executable` from the same filesystem/network
-context. See `../../PB_INTEGRATION.md`.
+context. See `../../docs/pb/README.md`.
 
 ## Design Boundary
 
