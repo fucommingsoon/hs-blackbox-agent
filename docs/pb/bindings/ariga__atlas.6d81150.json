@@ -27,6 +27,11 @@
       "source": "grader nested help names plus migrate/schema --help probes",
       "confidence": "high"
     },
+    "noArgsNeedle": {
+      "value": "Usage:",
+      "source": "grader no-arguments-shows-help tests and root command manual probe",
+      "confidence": "high"
+    },
     "completionCommand": {
       "value": "completion bash",
       "source": "eval.tests.test_subcommand_dispatch completion bash and manual probe",

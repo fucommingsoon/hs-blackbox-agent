@@ -135,8 +135,10 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 - `dtc requirements WatcherCli` 会输出该 archetype 的必填/可选 binding 字段，供决策节点按清单回到源码/测试/help/grader 中抽取参数。
 - `dtc requirements HttpClientCli` 会输出 HTTP client CLI 的必填/可选 binding 字段，供 bat/httpie/curl 类任务抽取 URL、method、body/header item、form/raw/auth/download/print 等参数面。
 - `dtc requirements StructuredSubcommandCli` 会输出多子命令 CLI 的必填 binding
-  字段，供 atlas 这类任务抽取 help/version/license/completion/nested help、
-  formatter 文件输入、migration 文件生成等参数面。
+  字段和可选子流字段，供 atlas 这类任务抽取 help/no-args/nested help、
+  optional version/license/completion、formatter 文件输入、migration 文件生成、
+  config/env/var 等参数面。version/license/completion 已被降级为 optional，
+  避免把 atlas 的元信息命令强加给所有结构化 CLI。
 - `dtc validate-binding --binding=<file>` 会校验 LLM/Codex 产出的 binding JSON，并区分 `binding_ready` / `binding_missing` / `binding_ambiguous`。
 - `dtc system-prepare --corpus=<dir> [--results=<results.jsonl>] [--out=<file>]` 会生成 DeepSeek 系统包，包含 corpus chunks、signal lines、execution result chunks，以及 archetype decision / binding generation / result evaluation / oracle generation 四个强约束 prompt。
 - `dtc system-call --packet=<file> --stage=<stage> [--out=<file>]` 会读取 `DEEPSEEK_API_KEY` 并调用 DeepSeek OpenAI-compatible API；真实调用会外发 packet 内容，必须先确认数据边界。
@@ -170,11 +172,13 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
   抽出的 binding 在 `docs/pb/bindings/ariga__atlas.6d81150.json`。
 - atlas binding-driven 同容器 DTC 最初在源码 corpus 缺失时扩出 provisional
   `11/11 Pass`，这个过程不合格；现已补入 source/grader，并按源码/grader
-  重新审计关键字段后扩到 source-audited `12/12 Pass`：
-  `help`、`version`、`license`、`completion bash`、`migrate --help`、
+  重新审计关键字段后扩到 source-audited `13/13 Pass`：
+  `help`、no-args usage、`version`、`license`、`completion bash`、`migrate --help`、
   `schema --help`、`schema fmt` 文件原地格式化、`migrate new` 生成 migration
   文件和 `atlas.sum`、`migrate hash`、`migrate validate`、checksum mismatch
   错误路径、`--config/--env/--var` 配置驱动 schema inspect。最新结果：
+  - `/private/tmp/hsbb-pb-atlas-dtc-structured-audit/container-out/atlas/20260701-083041-788100297000/results.jsonl`
+  旧 source-audited 12-step 结果：
   - `/private/tmp/hsbb-pb-atlas-dtc-config-env-var/container-out/atlas/20260701-082403-737927710000/results.jsonl`
   旧 source-audited 11-step 结果：
   - `/private/tmp/hsbb-pb-atlas-dtc-source-audit/container-out/atlas/20260701-080917-987701050000/results.jsonl`
@@ -182,8 +186,13 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
   - `/private/tmp/hsbb-pb-atlas-dtc-v4/container-out/atlas/20260701-080142-505559548000/results.jsonl`
 - 当前已在源码/grader 中找到 `schema fmt`、`migrate new/hash/validate`、
   `atlas.sum`、checksum mismatch、help/version/license/completion、config/env/var
-  的证据；最新结果确认 12 个 step 全部 Pass。这个结论只升级为
+  以及 no-args usage 的证据；最新结果确认 13 个 step 全部 Pass。这个结论只升级为
   source-audited seed 起点，不代表 atlas 高难度任务已足够复原。
+- 本轮逐项审计后的剪裁判断：保留 atlas 的 13 个 step，因为都有 source/grader
+  依据；把 version/license/completion 从 required 改成 optional，因为它们对
+  atlas 成立但不是所有结构化 CLI 共性；暂不把 migrate apply/status、schema
+  inspect sqlite DB、复杂 diff/lint/apply 状态机一次性塞入当前 archetype，避免
+  从“结构化 CLI”膨胀成 atlas 专项大而全流程。
 - atlas 还没有覆盖全量高难度面：config 错误路径、更多 schema/migration edge
   cases、复杂 migration diff/lint/apply 状态机都还需要继续抽到
   `StructuredSubcommandCli` 或拆成新的文件状态 archetype。
@@ -200,7 +209,7 @@ $BIN dtc run entr --app=<binary> --out=out/dtc-runs
 4. 类 entr 任务不要复制 `entrPlan` step；先跑 `dtc requirements WatcherCli`，再新增一个 `WatcherCliSpec`，最后用 `watcherCliSteps` 生成流程。
 5. 做 generic runtime hardening：structured command，减少 shell quoting 依赖。
 6. 给 result 增加 artifact index，把 `${WORK}` 下的重要文件挂到 result。
-7. atlas 下一步在 source-audited 12-step 起点上继续扩
+7. atlas 下一步在 source-audited 13-step 起点上继续扩
    `StructuredSubcommandCli`/文件状态 archetype，优先补 config 错误路径和更多
    schema/migration edge cases，不要在 catalog 里硬堆 atlas 专属 step。
 

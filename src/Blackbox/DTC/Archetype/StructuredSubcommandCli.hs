@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Blackbox.DTC.Archetype.StructuredSubcommandCli
-    ( ConfigEnvVarSpec (..)
+    ( CommandNeedleSpec (..)
+    , ConfigEnvVarSpec (..)
     , StructuredSubcommandCliSpec (..)
     , structuredSubcommandCliRequirements
     , structuredSubcommandCliSteps
@@ -20,12 +21,10 @@ data StructuredSubcommandCliSpec = StructuredSubcommandCliSpec
     , scsUsageNeedle          :: Text
     , scsTopLevelNeedles      :: [Text]
     , scsNestedHelpCommands   :: [Text]
-    , scsCompletionCommand    :: Text
-    , scsCompletionNeedle     :: Text
-    , scsVersionCommand       :: Text
-    , scsVersionNeedle        :: Text
-    , scsLicenseCommand       :: Text
-    , scsLicenseNeedle        :: Text
+    , scsNoArgsNeedle         :: Maybe Text
+    , scsCompletion           :: Maybe CommandNeedleSpec
+    , scsVersion              :: Maybe CommandNeedleSpec
+    , scsLicense              :: Maybe CommandNeedleSpec
     , scsFormatInputPath      :: FilePath
     , scsFormatInputText      :: Text
     , scsFormatCommand        :: Text
@@ -39,6 +38,12 @@ data StructuredSubcommandCliSpec = StructuredSubcommandCliSpec
     , scsMigrationValidateCommand :: Text
     , scsMigrationChecksumErrorNeedle :: Text
     , scsConfigEnvVar         :: Maybe ConfigEnvVarSpec
+    } deriving (Eq, Show)
+
+
+data CommandNeedleSpec = CommandNeedleSpec
+    { cnsCommand :: Text
+    , cnsNeedle  :: Text
     } deriving (Eq, Show)
 
 
@@ -77,27 +82,31 @@ structuredSubcommandCliRequirements = ArchetypeRequirement
             "Comma-separated subcommands whose --help output should be routed correctly."
             ["grader nested help tests", "--help output", "source command tree"]
             ["migrate,schema"]
-        , required "completionCommand"
+        , optional "noArgsNeedle"
+            "Stable substring expected when the binary is invoked with no arguments, if no-args usage/help is a supported behavior."
+            ["grader no-arguments tests", "manual probe", "source root command behavior"]
+            ["Usage:"]
+        , optional "completionCommand"
             "Command tail used to generate shell completion output."
             ["grader completion tests", "--help output", "source completion command"]
             ["completion bash"]
-        , required "completionNeedle"
+        , optional "completionNeedle"
             "Stable substring expected from completion output."
             ["grader completion assertions", "manual probe"]
             ["# bash completion"]
-        , required "versionCommand"
+        , optional "versionCommand"
             "Command tail used to print version information."
             ["grader version tests", "--help output", "source version command"]
             ["version"]
-        , required "versionNeedle"
+        , optional "versionNeedle"
             "Stable substring expected from version output."
             ["grader version assertions", "manual probe"]
             ["atlas unofficial version"]
-        , required "licenseCommand"
+        , optional "licenseCommand"
             "Command tail used to print license information."
             ["grader license tests", "--help output", "source license command"]
             ["license"]
-        , required "licenseNeedle"
+        , optional "licenseNeedle"
             "Stable substring expected from license output."
             ["grader license assertions", "manual probe"]
             ["LICENSE"]
@@ -180,10 +189,11 @@ structuredSubcommandCliRequirements = ArchetypeRequirement
 structuredSubcommandCliSteps :: StructuredSubcommandCliSpec -> [PlanStep]
 structuredSubcommandCliSteps spec =
     [ topLevelHelpStep spec
-    , versionStep spec
-    , licenseStep spec
-    , completionStep spec
     ]
+    <> maybe [] ((: []) . noArgsStep spec) (scsNoArgsNeedle spec)
+    <> maybe [] ((: []) . versionStep spec) (scsVersion spec)
+    <> maybe [] ((: []) . licenseStep spec) (scsLicense spec)
+    <> maybe [] ((: []) . completionStep spec) (scsCompletion spec)
     <> map (nestedHelpStep spec) (scsNestedHelpCommands spec)
     <> [ formatFileStep spec
        , migrationNewStep spec
@@ -224,21 +234,35 @@ nestedHelpStep spec command =
         ]
 
 
-versionStep :: StructuredSubcommandCliSpec -> PlanStep
-versionStep spec =
-    simpleCommandStep spec "version" "cli.version" (scsVersionCommand spec) (scsVersionNeedle spec)
+noArgsStep :: StructuredSubcommandCliSpec -> Text -> PlanStep
+noArgsStep spec needle =
+    step spec "no_args" "cli.no_args_usage" SyncProbe []
+        [bs "cli.no_args", bs "stdout.usage", bs "exit.code"]
+        [ss "run.cmd", ss "expect.exit", ss "expect.stdout"]
+        (RunSpec "app" Nothing 5000 RunSync [])
+        []
+        [ ExpectExit (scsSuccessExitCode spec)
+        , ExpectStdoutContains needle
+        ]
+        [ "No-argument usage/help behavior generated from StructuredSubcommandCliSpec."
+        ]
+
+
+versionStep :: StructuredSubcommandCliSpec -> CommandNeedleSpec -> PlanStep
+versionStep spec commandSpec =
+    simpleCommandStep spec "version" "cli.version" (cnsCommand commandSpec) (cnsNeedle commandSpec)
         [bs "cli.version", bs "stdout.metadata", bs "exit.code"]
 
 
-licenseStep :: StructuredSubcommandCliSpec -> PlanStep
-licenseStep spec =
-    simpleCommandStep spec "license" "cli.license" (scsLicenseCommand spec) (scsLicenseNeedle spec)
+licenseStep :: StructuredSubcommandCliSpec -> CommandNeedleSpec -> PlanStep
+licenseStep spec commandSpec =
+    simpleCommandStep spec "license" "cli.license" (cnsCommand commandSpec) (cnsNeedle commandSpec)
         [bs "cli.license", bs "stdout.metadata", bs "exit.code"]
 
 
-completionStep :: StructuredSubcommandCliSpec -> PlanStep
-completionStep spec =
-    simpleCommandStep spec "completion" "cli.completion" (scsCompletionCommand spec) (scsCompletionNeedle spec)
+completionStep :: StructuredSubcommandCliSpec -> CommandNeedleSpec -> PlanStep
+completionStep spec commandSpec =
+    simpleCommandStep spec "completion" "cli.completion" (cnsCommand commandSpec) (cnsNeedle commandSpec)
         [bs "cli.completion", bs "stdout.script", bs "exit.code"]
 
 

@@ -80,15 +80,15 @@ $HSBB dtc run entr --app=<binary> --out=out/dtc-runs
 - `atlas`: 高难度 PB 任务，source/grader 已补入 corpus。此前由 Codex 人工替代
   LLM 抽取的 `StructuredSubcommandCli` binding 最初是在源码 corpus 缺失时扩出
   11 个 flow，这个过程不合格；现已按 atlas source/grader 重新审计关键字段，
-  并在 PB task container 内扩到 12/12 Pass。覆盖：help、version、license、
-  completion、migrate/schema nested help、`schema fmt`、`migrate new`、
+  并在 PB task container 内扩到 13/13 Pass。覆盖：help/no-args usage、
+  version、license、completion、migrate/schema nested help、`schema fmt`、`migrate new`、
   `migrate hash`、`migrate validate`、checksum mismatch、`--config/--env/--var`
   配置驱动 schema inspect。它可作为 source-audited seed 起点，但还不是
   reconstruction-ready。
 
 PB reference 环境标准执行方式是把 Linux 版 `hsbb` 注入 task container，与
 `/workspace/executable` 同容器运行。最近一次真实结果：`entr` 为 `9/9 Pass`，
-`bat` 为 `14/14 Pass`，`atlas` 为 source-audited `12/12 Pass`。这比 host `hsbb` +
+`bat` 为 `14/14 Pass`，`atlas` 为 source-audited `13/13 Pass`。这比 host `hsbb` +
 `docker exec` wrapper 更可靠，因为 fixture、trigger 和黑盒共享同一个文件/网络视角。
 
 这些 Pass 的含义是“当前 DTC plan 覆盖的 behavior/spec surfaces 成立”，不是

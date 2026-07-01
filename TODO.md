@@ -51,10 +51,11 @@
 - `ariga__atlas.6d81150`: source/grader 已补到 corpus。第一版
   `StructuredSubcommandCli` binding-driven flow 最初是在 source corpus 缺失时
   扩出的，这个过程不合格；现已完成 source-grounded re-audit 并复跑
-  source-audited 12/12。覆盖 help/completion/version/license、nested help、
-  `schema fmt`、`migrate new/hash/validate`、checksum mismatch、config/env/var
-  驱动 schema inspect。下一步补 config 错误路径和更多 schema/migration edge
-  cases，不要直接堆 atlas 专属步骤。
+  source-audited 13/13。覆盖 help/no-args usage、completion/version/license、
+  nested help、`schema fmt`、`migrate new/hash/validate`、checksum mismatch、
+  config/env/var 驱动 schema inspect。version/license/completion 已改成
+  optional 子流，避免污染下一个结构化 CLI。下一步补 config 错误路径和更多
+  schema/migration edge cases，不要直接堆 atlas 专属步骤。
 
 ## 已完成 runtime 基础能力
 
@@ -76,7 +77,7 @@
 - 轻量本地 HTTP fixture 已有，支持 method/path/query/header/body needle 匹配和 `${PORT}` 插值。
 - continuous watcher evidence flow 已显式化：证据出现后 runtime 主动停止长驻进程，结果写出 `drrStopReason`。
 - PB 同容器真实执行已验证：Linux `hsbb` 注入 task container 后，`entr` 9/9
-  Pass，`bat` 14/14 Pass，`atlas` source-audited 12/12 Pass。执行细节见
+  Pass，`bat` 14/14 Pass，`atlas` source-audited 13/13 Pass。执行细节见
   `docs/pb/README.md`。
 - `scripts/pb-dtc-runner.sh` 已有，支持 `--mode=app` 首探
   `/workspace/executable`，以及默认 `hsbb` 模式执行同容器 DTC。

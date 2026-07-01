@@ -80,6 +80,9 @@ structuredSubcommandPlanFromBinding :: BindingInput -> Either Text DtcPlan
 structuredSubcommandPlanFromBinding input = do
     name <- field "name" input
     successExitCode <- intField "successExitCode" input
+    completion <- optionalCommandNeedle input "completionCommand" "completionNeedle"
+    version <- optionalCommandNeedle input "versionCommand" "versionNeedle"
+    license <- optionalCommandNeedle input "licenseCommand" "licenseNeedle"
     configEnvVar <- structuredConfigEnvVar input
     spec <- StructuredSubcommandCliSpec
         <$> pure name
@@ -88,12 +91,10 @@ structuredSubcommandPlanFromBinding input = do
         <*> field "usageNeedle" input
         <*> listField "topLevelNeedles" input
         <*> listField "nestedHelpCommands" input
-        <*> field "completionCommand" input
-        <*> field "completionNeedle" input
-        <*> field "versionCommand" input
-        <*> field "versionNeedle" input
-        <*> field "licenseCommand" input
-        <*> field "licenseNeedle" input
+        <*> pure (optionalField "noArgsNeedle" input)
+        <*> pure completion
+        <*> pure version
+        <*> pure license
         <*> fmap T.unpack (field "formatInputPath" input)
         <*> field "formatInputText" input
         <*> field "formatCommand" input
@@ -113,6 +114,14 @@ structuredSubcommandPlanFromBinding input = do
         , dpArchetypes = [StructuredSubcommandCli]
         , dpSteps = structuredSubcommandCliSteps spec
         }
+
+
+optionalCommandNeedle :: BindingInput -> Text -> Text -> Either Text (Maybe CommandNeedleSpec)
+optionalCommandNeedle input commandField needleField =
+    case (optionalField commandField input, optionalField needleField input) of
+        (Nothing, Nothing) -> Right Nothing
+        (Just command, Just needle) -> Right (Just (CommandNeedleSpec command needle))
+        _ -> Left ("structured command binding requires both fields or neither: " <> commandField <> "," <> needleField)
 
 
 structuredConfigEnvVar :: BindingInput -> Either Text (Maybe ConfigEnvVarSpec)
