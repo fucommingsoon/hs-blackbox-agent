@@ -20,7 +20,7 @@ triggerUnsupported :: [TriggerAction] -> [Text]
 triggerUnsupported =
     concatMap classify
   where
-    classify TriggerHttpReady      = ["trigger unsupported: http ready"]
+    classify TriggerHttpReady      = []
     classify (TriggerAppend _ _ _) = []
     classify (TriggerTouch _ _)    = []
     classify (TriggerMkdir _ _)    = []

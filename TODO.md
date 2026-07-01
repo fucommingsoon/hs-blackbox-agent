@@ -6,8 +6,12 @@
 - 保持 `app 参数1 参数2 ...` 的 plan 写法，但 runtime 内部不要长期依赖 shell string。
 - readiness gate 继续加强：不能只看 surface 名称齐不齐，还要看关键 step 是否真实命中对应证据。
 - 继续把 binding spec catalog 数据化，避免 Haskell 入口堆项目。
-- 根据 `binding_ready` 的外部 binding 生成 project spec/plan，减少手写 catalog。
+- 把 PB 同容器执行方案产品化：复用 Linux `hsbb` builder/cache，把 task image +
+  `/workspace/executable` + `hsbb dtc run-binding` 变成稳定 runner，不依赖 host
+  `docker exec` wrapper。
+- 根据 `binding_ready` 的外部 binding 生成 project spec/plan 已有初版：`plan-binding` / `run-binding` 支持 `HttpClientCli`。
 - result 后续可补 artifact index，把 `${WORK}` 下的重要文件挂到 result。
+- LLM 系统层已有 DeepSeek API adapter 和输出校验器；后续补更细的 schema 校验、response pretty/JSONL 包格式、以及外发数据脱敏/裁剪策略。
 
 ## P1 - DTC runtime components
 
@@ -37,8 +41,10 @@
 
 - `entr`: 从 `system_test.sh` 抽 watcher CLI flow archetype。
 - `entr`: 从 grader 抽交互/状态/错误路径补充项。
-- `bat`: 从 grader 抽 HTTP client CLI flow archetype。
-- `bat`: 用源码确认 CLI 参数解析、URL shorthand、output/download/bench 行为。
+- `bat`: `HttpClientCli` requirements + reusable flow builder 已有；当前主流 11-step flow 已覆盖 method/query/header/json/form/raw/status/pretty。
+- `bat`: 用源码/grader 继续确认 URL shorthand、auth、download、print section、bench 行为，优先补到 archetype flow 或独立 reusable flow，不要继续堆 `batPlan` 单项目 step。
+- PB 200+ 融合：继续挑选能暴露新 archetype 或现有 archetype 缺口的项目，不要
+  以单项目得分为目标堆 step。
 
 ## 已完成 runtime 基础能力
 
@@ -50,8 +56,17 @@
 - `Blackbox.DTC.Catalog` 项目绑定层 已有。
 - `hsbb dtc coverage <plan>` 已有。
 - `hsbb dtc requirements WatcherCli` 已有。
+- `hsbb dtc requirements HttpClientCli` 已有。
 - `hsbb dtc validate-binding --binding=<file>` 已有。
+- `hsbb dtc plan-binding --binding=<file>` 已有，当前支持 `HttpClientCli`。
+- `hsbb dtc run-binding --binding=<file> --app=<binary>` 已有，当前支持 `HttpClientCli`。
+- `hsbb dtc system-prepare --corpus=<dir> [--results=<results.jsonl>] [--out=<file>]` 已有，生成 DeepSeek system packet：corpus chunks、signal lines、result chunks、四阶段 prompt。
+- `hsbb dtc system-call --packet=<file> --stage=<stage> [--out=<file>]` 已有，读取 `DEEPSEEK_API_KEY` 并调用 DeepSeek API。
+- `hsbb dtc system-validate --packet=<file> --stage=<stage> --response=<file>` 已有，可校验直接 JSON 或 DeepSeek API response wrapper。
+- 轻量本地 HTTP fixture 已有，支持 method/path/query/header/body needle 匹配和 `${PORT}` 插值。
 - continuous watcher evidence flow 已显式化：证据出现后 runtime 主动停止长驻进程，结果写出 `drrStopReason`。
+- PB 同容器真实执行已验证：Linux `hsbb` 注入 task container 后，`entr` 9/9
+  Pass，`bat` 11/11 Pass。执行细节见 `PB_INTEGRATION.md`。
 
 ## 已完成 entr seed flow
 

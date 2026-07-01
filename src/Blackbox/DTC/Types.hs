@@ -159,6 +159,10 @@ data HttpRoute = HttpRoute
     , hrPath   :: Text
     , hrStatus :: Int
     , hrBody   :: Text
+    , hrResponseContentType :: Text
+    , hrRequestPathNeedles :: [Text]
+    , hrRequestHeaderNeedles :: [Text]
+    , hrRequestBodyNeedles :: [Text]
     } deriving (Eq, Show, Generic)
 
 instance A.ToJSON HttpRoute

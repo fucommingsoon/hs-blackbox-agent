@@ -8,6 +8,7 @@ module Blackbox.DTC.Runtime
     ) where
 
 import           Control.Monad          (forM)
+import           Control.Exception      (finally)
 import qualified Data.Aeson             as A
 import qualified Data.ByteString.Lazy   as BL
 import qualified Data.Text              as T
@@ -46,17 +47,21 @@ runPlan opts appPath plan = do
 runStep :: DtcEnv -> FilePath -> PlanStep -> IO DtcRunResult
 runStep env appPath step = do
     fixtureState <- setupFixtures env (psSetup step)
-    let unsupported = fsUnsupported fixtureState <> triggerUnsupported (psTriggers step)
-    if not (null unsupported)
-        then pure (unsupportedResult env step unsupported)
-        else do
-            capture <- runSpec env appPath (psRun step) (psTriggers step)
-            let failures = verifyExpectations (psExpect step) capture
-                verdict =
-                    case failures of
-                        [] -> Pass
-                        xs -> Fail xs
-            pure (captureResult env step verdict capture)
+    runWithFixtures fixtureState `finally` fsCleanup fixtureState
+  where
+    runWithFixtures fixtureState = do
+        let stepEnv = fsEnv fixtureState
+            unsupported = fsUnsupported fixtureState <> triggerUnsupported (psTriggers step)
+        if not (null unsupported)
+            then pure (unsupportedResult stepEnv step unsupported)
+            else do
+                capture <- runSpec stepEnv appPath (psRun step) (psTriggers step)
+                let failures = verifyExpectations (psExpect step) capture
+                    verdict =
+                        case failures of
+                            [] -> Pass
+                            xs -> Fail xs
+                pure (captureResult stepEnv step verdict capture)
 
 
 unsupportedResult :: DtcEnv -> PlanStep -> [Text] -> DtcRunResult

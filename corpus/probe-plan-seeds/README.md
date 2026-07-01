@@ -3,9 +3,10 @@
 This corpus is for Haskell probe-plan runtime design. It intentionally keeps
 "god-view" materials separate from ordinary black-box task inputs.
 
-Do not feed `grader/` into the normal black-box agent loop. It is here so we can
-audit real grader behavior while designing deterministic probe execution
-primitives.
+Do not feed `grader/` into the runtime hot path or a normal black-box probe
+loop. It is here so we can audit real grader behavior while designing
+deterministic DTC primitives and system-layer packets such as
+`hsbb dtc system-prepare`.
 
 ## Layout
 
@@ -41,6 +42,11 @@ workspace shape, but they are not currently the source of grader tests in this
 corpus. The grader files here come from the local `programbench/ProgramBench-Tests`
 cache, narrowed to only each branch's `eval/` directory.
 
+For DTC execution, do not treat the host-side `probe` wrapper as the standard
+environment. The reliable PB path is to put Linux `hsbb` inside the task
+container and run `/workspace/executable` from the same filesystem/network
+context. See `../../PB_INTEGRATION.md`.
+
 ## Design Boundary
 
 Use this corpus to design and verify:
@@ -52,6 +58,7 @@ Use this corpus to design and verify:
 - file mutation triggers
 - local HTTP fixtures
 - feature-matrix extraction
+- system-layer mechanical reading packets for DeepSeek/Codex
 
 Do not use this corpus as evidence that a black-box exploration agent could have
 known a behavior without probing it.

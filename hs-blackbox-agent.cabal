@@ -15,23 +15,27 @@ common deps
                       directory,
                       filepath,
                       process,
-                      time
+                      time,
+                      vector
     ghc-options:      -Wall
 
 library
     import:           deps
     hs-source-dirs:   src
     exposed-modules:  Blackbox.DTC
+                      Blackbox.DTC.Archetype.HttpClientCli
                       Blackbox.DTC.Archetype.WatcherCli
                       Blackbox.DTC.Binding
                       Blackbox.DTC.Catalog
                       Blackbox.DTC.Coverage
                       Blackbox.DTC.Env
                       Blackbox.DTC.Fixture
+                      Blackbox.DTC.PlanFromBinding
                       Blackbox.DTC.Result
                       Blackbox.DTC.Requirements
                       Blackbox.DTC.Runner
                       Blackbox.DTC.Runtime
+                      Blackbox.DTC.System
                       Blackbox.DTC.Trigger
                       Blackbox.DTC.Types
                       Blackbox.DTC.Verifier

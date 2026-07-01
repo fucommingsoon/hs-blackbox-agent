@@ -1,5 +1,9 @@
 # 黑盒探测方法学 — distill v1
 
+> **状态**：历史参考 / 方法学材料，不是当前 `hsbb` 操作手册。
+> 当前主线请读根目录 `STATUS.md`、`AGENTS.md`、`FLOW.md`。
+> 本文里的 `./probe`、TodoWrite、旧 agent 探测习惯只用于理解早期经验，不应作为 Haskell DTC plan/runtime 的当前接口。
+
 > **来源**：`cc_jsonl/2026-06-14 ~ 2026-06-16` 的 12 份案例报告
 > **用途**：给新 Haskell 黑盒探测 agent 当 embedded reference
 > **合法性**：本文档只 distill **如何探测黑盒** 的元方法（probe 技巧、形态判定、idiom 库）。**不**包含任何 PB grader 内部数据（tests.json / summaries.jsonl / archetypes 等）。新 agent 嵌入本文件**不构成作弊**。

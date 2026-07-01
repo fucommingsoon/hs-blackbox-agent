@@ -203,11 +203,19 @@ bindingAmbiguous :: BindingValue -> Bool
 bindingAmbiguous value =
     T.null (T.strip (bvSource value))
         || normalizeConfidence (bvConfidence value) == "low"
+        || normalizeConfidence (bvConfidence value) == "missing_or_ambiguous"
+        || normalizeField (bvValue value) == "missing_or_ambiguous"
+        || normalizeField (bvSource value) == "missing_or_ambiguous"
         || T.null (normalizeConfidence (bvConfidence value))
 
 
 normalizeConfidence :: Text -> Text
 normalizeConfidence =
+    T.toLower . T.strip
+
+
+normalizeField :: Text -> Text
+normalizeField =
     T.toLower . T.strip
 
 
